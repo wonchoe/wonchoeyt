@@ -36,5 +36,4 @@ jobs:
           platforms: linux/arm64
           tags: |
             ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
             ${{ env.IMAGE_NAME }}:${{ github.run_number }}
