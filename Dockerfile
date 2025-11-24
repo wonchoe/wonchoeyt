@@ -1,13 +1,21 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# Install ffmpeg for yt-dlp
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
+# Workdir
 WORKDIR /app
 
-COPY requirements.txt ./
+# Dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py ./
+# App file
+COPY app.py .
 
-
-ENTRYPOINT ["sh", "-c", "python3 /app/app.py"]
+# IMPORTANT:
+# 1. cookies.txt буде змонтований Kubernetes у /app/cookies.txt (read-only)
+# 2. Ми копіюємо його в /tmp/cookies.txt (rw)
+# 3. Python запускається вже з правильним cookiefile
+ENTRYPOINT ["sh", "-c", "cp /app/cookies.txt /tmp/cookies.txt 2>/dev/null || true && python3 /app/app.py"]

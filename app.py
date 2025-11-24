@@ -55,7 +55,7 @@ async def download_audio(url: str, output_dir: Path) -> Path:
 
     ydl_opts = {
         "format": "bestaudio/best",
-        "cookiefile": "cookies.txt",
+        "cookiefile": "/tmp/cookies.txt",
         "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
