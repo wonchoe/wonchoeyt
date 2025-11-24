@@ -14,23 +14,16 @@ from dotenv import load_dotenv
 # Завантажуємо .env файл
 print("📄 Завантаження змінних середовища з /.env ...")
 
-load_dotenv("/.env", override=True)
+load_dotenv(".env", override=True)
 
 # DEBUG
 from dotenv import dotenv_values
 from pathlib import Path
 print("📄 DEBUG: Перевіряємо файл /.env ...")
-print(" - exists:", Path("/.env").exists())
+print(" - exists:", Path(".env").exists())
 
-print("\n📄 DEBUG: Вміст /.env (dotenv_values):")
-env_file_values = dotenv_values("/.env")
-for k, v in env_file_values.items():
-    print(f"   {k} = {v}")
+env_file_values = dotenv_values(".env")
 
-print("\n📄 DEBUG: Значення у os.environ після load_dotenv:")
-print("   TELEGRAM_BOT_TOKEN =", os.environ.get("TELEGRAM_BOT_TOKEN"))
-print("   DOWNLOAD_DIR =", os.environ.get("DOWNLOAD_DIR"))
-print("   DOWNLOAD_DIR =", os.environ.get("DOWNLOAD_DIR"))
 
 
 def update_yt_dlp() -> None:
