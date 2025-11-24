@@ -13,4 +13,4 @@ ENV TELEGRAM_BOT_TOKEN="" DOWNLOAD_DIR=/app/downloads
 
 RUN mkdir -p "$DOWNLOAD_DIR"
 
-CMD ["python3", "/app/app.py"]
+ENTRYPOINT ["sh", "-c", "python3 /app/app.py"]
