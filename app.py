@@ -8,11 +8,18 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
 import yt_dlp
+from dotenv import load_dotenv
+
+
+# Завантажуємо .env файл
+print("📄 Завантаження змінних середовища з /.env ...")
+load_dotenv("/.env")
+print("✅ Змінні середовища успішно завантажені")
 
 
 def update_yt_dlp() -> None:
     try:
-        print("🔄 Updating yt dlp to the latest version...")
+        print("🔄 Оновлюємо yt-dlp до останньої версії...")
         subprocess.check_call([
             os.environ.get("PYTHON", "python"),
             "-m",
@@ -22,13 +29,13 @@ def update_yt_dlp() -> None:
             "--upgrade",
             "yt-dlp",
         ])
-        print("✅ yt dlp updated successfully")
+        print("✅ yt-dlp успішно оновлено")
     except Exception as exc:
-        print(f"⚠️ Warning updating yt dlp failed: {exc}")
+        print(f"⚠️ Помилка під час оновлення yt-dlp: {exc}")
 
 
 async def download_audio(url: str, output_dir: Path) -> Path:
-    print(f"🎧 Starting audio extraction from URL: {url}")
+    print(f"🎧 Починаємо обробку аудіо за посиланням: {url}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ydl_opts = {
@@ -44,18 +51,18 @@ async def download_audio(url: str, output_dir: Path) -> Path:
     }
 
     try:
-        print("📥 Downloading audio stream...")
+        print("📥 Завантаження аудіостріму...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
 
-        print("🔊 Converting to MP3...")
+        print("🔊 Конвертація у MP3...")
         original_filepath = Path(ydl.prepare_filename(info))
         mp3_filepath = original_filepath.with_suffix(".mp3")
-        print(f"🎉 Done MP3 ready: {mp3_filepath}")
+        print(f"🎉 Готово! MP3 файл створено: {mp3_filepath}")
         return mp3_filepath
 
     except Exception as exc:
-        print(f"❌ Error while processing audio: {exc}")
+        print(f"❌ Сталася помилка під час обробки аудіо: {exc}")
         raise
 
 
@@ -65,18 +72,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     text = message.text.strip()
-    print(f"💬 New message received: {text}")
+    print(f"💬 Отримано нове повідомлення: {text}")
 
     youtube_regex = re.compile(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[^\s]+")
     match = youtube_regex.search(text)
 
     if not match:
-        print("🙅 Not a YouTube link")
-        await message.reply_text("Будь ласка надішліть коректне посилання на YouTube.")
+        print("🙅 Повідомлення не містить YouTube посилання")
+        await message.reply_text("Будь ласка, надішліть коректне посилання на YouTube.")
         return
 
     url = match.group(0)
-    print(f"🎯 Extracted YouTube URL: {url}")
+    print(f"🎯 Витягнуто YouTube посилання: {url}")
 
     await message.reply_text("Готуємо аудіо... 🎶", quote=False)
 
@@ -86,32 +93,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         mp3_file = await download_audio(url, download_dir)
     except Exception as exc:
-        print(f"💥 Download failed: {exc}")
+        print(f"💥 Завантаження не вдалося: {exc}")
         await message.reply_text(f"Не вдалося завантажити аудіо: {exc}")
         return
 
     try:
-        print(f"📤 Sending MP3 file to user: {mp3_file.name}")
+        print(f"📤 Надсилаємо MP3 файл користувачу: {mp3_file.name}")
         with mp3_file.open("rb") as audio_stream:
             await message.reply_audio(audio=audio_stream, filename=mp3_file.name)
-        print("✅ File sent successfully")
+        print("✅ Файл успішно надіслано")
 
     except Exception as exc:
-        print(f"❌ Failed to send file: {exc}")
-        await message.reply_text(f"Не вдалося відправити файл: {exc}")
+        print(f"❌ Не вдалося надіслати файл: {exc}")
+        await message.reply_text(f"Помилка надсилання файлу: {exc}")
 
 
 def main():
-    print("🚀 Telegram bot is starting up...")
+    print("🚀 Запуск Telegram-бота...")
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    print(f"🔐 Токен завантажено? {'Так' if token else 'НІ!'}")
+
     if not token:
-        raise RuntimeError("❗ TELEGRAM_BOT_TOKEN is not set")
+        raise RuntimeError("❗ TELEGRAM_BOT_TOKEN не встановлено")
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    print("🤖 Bot is running. Press Ctrl + C to stop.")
+    print("🤖 Бот працює. Для зупинки натисніть Ctrl + C.")
     app.run_polling()
 
 
