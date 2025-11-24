@@ -1,35 +1,27 @@
-import asyncio
 import os
 import re
-import subprocess
 import asyncio
 from pathlib import Path
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    MessageHandler,
+    filters
+)
 
 import yt_dlp
 from dotenv import load_dotenv
 
 
-# Завантажуємо .env файл
-print("📄 Завантаження змінних середовища з /.env ...")
-
+# Load ENV
+print("📄 Loading .env...")
 load_dotenv(".env", override=True)
-
-# DEBUG
-from dotenv import dotenv_values
-from pathlib import Path
-print("📄 DEBUG: Перевіряємо файл /.env ...")
-print(" - exists:", Path(".env").exists())
-
-env_file_values = dotenv_values(".env")
-
-
 
 
 async def download_audio(url: str, output_dir: Path) -> Path:
-    print(f"🎧 Починаємо обробку аудіо за посиланням: {url}")
+    print(f"🎧 Downloading audio: {url}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ydl_opts = {
@@ -45,80 +37,67 @@ async def download_audio(url: str, output_dir: Path) -> Path:
     }
 
     try:
-        print("📥 Завантаження аудіостріму...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
 
-        print("🔊 Конвертація у MP3...")
         original_filepath = Path(ydl.prepare_filename(info))
         mp3_filepath = original_filepath.with_suffix(".mp3")
-        print(f"🎉 Готово! MP3 файл створено: {mp3_filepath}")
+        print(f"🎉 MP3 ready: {mp3_filepath}")
+
         return mp3_filepath
 
     except Exception as exc:
-        print(f"❌ Сталася помилка під час обробки аудіо: {exc}")
+        print(f"❌ Error: {exc}")
         raise
 
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.message
-    if not message or not message.text:
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    if not msg or not msg.text:
         return
 
-    text = message.text.strip()
-    print(f"💬 Отримано нове повідомлення: {text}")
+    text = msg.text.strip()
+    print(f"💬 Received: {text}")
 
     youtube_regex = re.compile(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[^\s]+")
     match = youtube_regex.search(text)
 
     if not match:
-        print("🙅 Повідомлення не містить YouTube посилання")
-        await message.reply_text("Будь ласка, надішліть коректне посилання на YouTube.")
+        await msg.reply_text("Будь ласка, надішліть коректне посилання на YouTube.")
         return
 
     url = match.group(0)
-    print(f"🎯 Витягнуто YouTube посилання: {url}")
 
-    await message.reply_text("Готуємо аудіо... 🎶", quote=False)
-    
+    await msg.reply_text("Готуємо аудіо... 🎶", quote=False)
+
     download_dir = Path(os.environ.get("DOWNLOAD_DIR", "downloads"))
 
     try:
         mp3_file = await download_audio(url, download_dir)
     except Exception as exc:
-        print(f"💥 Завантаження не вдалося: {exc}")
-        await message.reply_text(f"Не вдалося завантажити аудіо: {exc}")
+        await msg.reply_text(f"Не вдалося завантажити аудіо: {exc}")
         return
 
     try:
-        print(f"📤 Надсилаємо MP3 файл користувачу: {mp3_file.name}")
-        with mp3_file.open("rb") as audio_stream:
-            await message.reply_audio(audio=audio_stream, filename=mp3_file.name)
-        print("✅ Файл успішно надіслано")
-
+        with mp3_file.open("rb") as file_stream:
+            await msg.reply_audio(audio=file_stream, filename=mp3_file.name)
     except Exception as exc:
-        print(f"❌ Не вдалося надіслати файл: {exc}")
-        await message.reply_text(f"Помилка надсилання файлу: {exc}")
-
+        await msg.reply_text(f"Помилка надсилання файлу: {exc}")
 
 
 async def main():
-    print("🚀 Запуск Telegram-бота...")
+    print("🚀 Starting bot...")
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("❗ TELEGRAM_BOT_TOKEN не встановлено")
 
     app = ApplicationBuilder().token(token).build()
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    await app.initialize()
-    await app.start()
+    print("🤖 Running polling (single instance, no conflicts)...")
+    await app.run_polling()   # <— ОСНОВНЕ РІШЕННЯ
 
-    print("🤖 Бот працює. Очікування...")
-    await app.updater.start_polling()
-
-    await asyncio.Event().wait()  # ПРОЦЕС ТРИМАЄ ЖИВИМ
 
 if __name__ == "__main__":
     asyncio.run(main())
