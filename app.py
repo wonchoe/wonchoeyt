@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import subprocess
+import asyncio
 from pathlib import Path
 
 from telegram import Update
@@ -25,22 +26,6 @@ print(" - exists:", Path(".env").exists())
 env_file_values = dotenv_values(".env")
 
 
-
-def update_yt_dlp() -> None:
-    try:
-        print("🔄 Оновлюємо yt-dlp до останньої версії...")
-        subprocess.check_call([
-            os.environ.get("PYTHON", "python"),
-            "-m",
-            "pip",
-            "install",
-            "--no-cache-dir",
-            "--upgrade",
-            "yt-dlp",
-        ])
-        print("✅ yt-dlp успішно оновлено")
-    except Exception as exc:
-        print(f"⚠️ Помилка під час оновлення yt-dlp: {exc}")
 
 
 async def download_audio(url: str, output_dir: Path) -> Path:
@@ -95,8 +80,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     print(f"🎯 Витягнуто YouTube посилання: {url}")
 
     await message.reply_text("Готуємо аудіо... 🎶", quote=False)
-
-    update_yt_dlp()
+    
     download_dir = Path(os.environ.get("DOWNLOAD_DIR", "downloads"))
 
     try:
@@ -117,21 +101,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await message.reply_text(f"Помилка надсилання файлу: {exc}")
 
 
-def main():
+
+async def main():
     print("🚀 Запуск Telegram-бота...")
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    print(f"🔐 Токен завантажено? {'Так' if token else 'НІ!'}")
-
     if not token:
         raise RuntimeError("❗ TELEGRAM_BOT_TOKEN не встановлено")
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    print("🤖 Бот працює. Для зупинки натисніть Ctrl + C.")
-    app.run_polling()
+    await app.initialize()
+    await app.start()
 
+    print("🤖 Бот працює. Очікування...")
+    await app.updater.start_polling()
+
+    await asyncio.Event().wait()  # ПРОЦЕС ТРИМАЄ ЖИВИМ
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -9,8 +9,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py ./
 
-ENV TELEGRAM_BOT_TOKEN="" DOWNLOAD_DIR=/app/downloads
-
-RUN mkdir -p "$DOWNLOAD_DIR"
 
 ENTRYPOINT ["sh", "-c", "python3 /app/app.py"]
