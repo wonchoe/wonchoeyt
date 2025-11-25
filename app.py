@@ -6,6 +6,7 @@ import json
 import fcntl
 import logging
 import asyncio
+import signal
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,6 +26,7 @@ from telegram.ext import (
 )
 
 import yt_dlp
+import aiohttp
 
 
 # ---------------------------------------------------------
@@ -47,15 +49,28 @@ load_dotenv(".env", override=True)
 # ---------------------------------------------------------
 # SINGLE INSTANCE LOCK
 # ---------------------------------------------------------
+lock_file = None
+
 def lock_or_exit():
+    global lock_file
     try:
-        fp = open("/tmp/ytdlbot.lock", "w")
-        fcntl.lockf(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file = open("/tmp/ytdlbot.lock", "w")
+        fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         log.info("🔒 lock acquired")
     except IOError:
         log.error("🚫 another instance is running")
         sys.exit(1)
 
+def release_lock():
+    global lock_file
+    if lock_file:
+        try:
+            fcntl.lockf(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
+            os.unlink("/tmp/ytdlbot.lock")
+            log.info("🔓 lock released")
+        except:
+            pass
 
 lock_or_exit()
 
@@ -132,93 +147,208 @@ async def download(
     video_fmt: str | None = None,
 ):
     chat_id = update.effective_chat.id
-    status_msg = await context.bot.send_message(chat_id, "⏳ Starting...")
+    status_msg = await context.bot.send_message(chat_id, "⏳ Починаємо...")
 
     download_dir = Path("downloads")
     download_dir.mkdir(exist_ok=True)
 
-    last_update = 0
+    last_update = [0]
+    main_loop = asyncio.get_running_loop()
 
-    # async progress callback
-    async def update_progress(d):
-        nonlocal last_update
-
+    def progress_hook(d):
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             done = d.get("downloaded_bytes", 0)
 
             if total > 0:
                 percent = done / total * 100
-                if time.time() - last_update > 0.5:
-                    last_update = time.time()
+                if time.time() - last_update[0] > 0.5:
+                    last_update[0] = time.time()
                     bar = make_bar(percent)
-                    try:
-                        await status_msg.edit_text(
-                            f"⬇️ Downloading...\n{bar} {percent:.1f}%"
-                        )
-                    except:
-                        pass
+                    asyncio.run_coroutine_threadsafe(
+                        status_msg.edit_text(f"⬇️ Завантаження...\n{bar} {percent:.1f}%"),
+                        main_loop
+                    )
             else:
-                if time.time() - last_update > 0.5:
+                if time.time() - last_update[0] > 0.5:
+                    last_update[0] = time.time()
                     mb = done / 1024 / 1024
-                    try:
-                        await status_msg.edit_text(
-                            f"⬇️ Downloading...\n{mb:.1f} MB"
-                        )
-                    except:
-                        pass
+                    asyncio.run_coroutine_threadsafe(
+                        status_msg.edit_text(f"⬇️ Завантаження...\n{mb:.1f} MB"),
+                        main_loop
+                    )
 
         elif d["status"] == "finished":
-            try:
-                await status_msg.edit_text("🔄 Converting...")
-            except:
-                pass
+            asyncio.run_coroutine_threadsafe(
+                status_msg.edit_text("🔄 Конвертуємо..."),
+                main_loop
+            )
 
-    # sync wrapper
     def sync_download():
         opts = {
             "cookiefile": "/tmp/cookies.txt",
             "outtmpl": str(download_dir / "%(title)s.%(ext)s"),
             "quiet": True,
             "nocheckcertificate": True,
-            "progress_hooks": [lambda d: asyncio.run_coroutine_threadsafe(update_progress(d), asyncio.get_running_loop())],
+            "progress_hooks": [progress_hook],
+            # Clean up filenames
+            "restrictfilenames": True,  # ASCII only
         }
 
         if mode == AUDIO:
+            # Download best audio + convert to MP3
             opts["format"] = "bestaudio/best"
             opts["postprocessors"] = [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "0",
+                "preferredquality": "192",  # 192kbps = good quality
             }]
+            opts["writethumbnail"] = False
+            opts["writesubtitles"] = False
+            opts["noplaylist"] = True
         else:
             if video_fmt:
-                opts["format"] = f"{video_fmt}+bestaudio/best"
+                opts["format"] = f"bestvideo[height<={video_fmt}]+bestaudio/best"
             else:
                 opts["format"] = "bestvideo+bestaudio"
             opts["merge_output_format"] = "mp4"
 
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            return ydl.prepare_filename(info), mode
+            original_path = ydl.prepare_filename(info)
+            
+            # For audio, return MP3 path
+            if mode == AUDIO:
+                return str(Path(original_path).with_suffix(".mp3")), mode
+            return original_path, mode
 
     loop = asyncio.get_running_loop()
     filepath, mode = await loop.run_in_executor(POOL, sync_download)
 
     fp = Path(filepath)
-    if mode == AUDIO:
-        fp = fp.with_suffix(".mp3")
+    
+    # Verify file exists
+    if not fp.exists():
+        log.error(f"File not found: {filepath}")
+        await status_msg.edit_text("❌ Помилка: файл не знайдено після конвертації")
+        return
 
-    await status_msg.edit_text("📤 Uploading...")
+    # Clean filename: replace URL encoding and special chars with underscores
+    clean_name = fp.name
+    clean_name = clean_name.replace("%20", "_")  # spaces
+    clean_name = re.sub(r'%[0-9A-Fa-f]{2}', '_', clean_name)  # other URL encoding
+    clean_name = re.sub(r'[^\w\s._-]', '_', clean_name)  # special chars
+    clean_name = re.sub(r'_+', '_', clean_name)  # multiple underscores
+    clean_name = clean_name.strip('_')  # trim edges
+    
+    # Rename file if needed
+    if clean_name != fp.name:
+        new_fp = fp.parent / clean_name
+        fp.rename(new_fp)
+        fp = new_fp
+        log.info(f"Renamed to: {clean_name}")
 
-    with fp.open("rb") as f:
-        await context.bot.send_document(
-            chat_id,
-            document=InputFile(f, filename=fp.name),
-            caption="Готово ✔"
-        )
+    # Check file size
+    file_size = fp.stat().st_size
+    max_size = 50 * 1024 * 1024  # 50 MB
 
-    await status_msg.edit_text("✅ Done")
+    # Upload large files to GoFile
+    if file_size > max_size:
+        file_type = "Відео" if mode == VIDEO else "Аудіо"
+        await status_msg.edit_text(f"📤 {file_type} завелике, завантажую на GoFile.io...")
+        try:
+            link = await upload_to_gofile(fp)
+            await status_msg.edit_text(
+                f"✅ {file_type} завелике для Telegram ({file_size / 1024 / 1024:.1f} MB).\n\n"
+                f"🔗 Файл було завантажено на gofile.io: {link}\n\n"
+            )
+        except Exception as e:
+            log.error(f"Upload to GoFile failed: {e}")
+            await status_msg.edit_text(
+                f"❌ Не вдалось завантажити: {e}\n\n"
+                f"{'Спробуйте нижчу якість або коротше відео.' if mode == VIDEO else 'Спробуйте коротшу аудіодоріжку.'}"
+            )
+        finally:
+            fp.unlink()
+        return
+
+    await status_msg.edit_text("📤 Завантаження в Telegram...")
+
+    try:
+        with fp.open("rb") as f:
+            if mode == AUDIO:
+                await context.bot.send_audio(
+                    chat_id,
+                    audio=InputFile(f, filename=fp.name),
+                    caption="✅ Готово"
+                )
+            else:
+                await context.bot.send_video(
+                    chat_id,
+                    video=InputFile(f, filename=fp.name),
+                    caption="✅ Готово",
+                    supports_streaming=True
+                )
+
+        await status_msg.edit_text("✅ Завантажено в Telegram")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Помилка відправки: {e}")
+        log.error(f"Upload error: {e}")
+    
+    # Clean up
+    try:
+        fp.unlink()
+    except:
+        pass
+
+
+async def upload_to_fileio(filepath: Path) -> str:
+    """Upload to file.io with proper error handling"""
+    async with aiohttp.ClientSession() as session:
+        with open(filepath, 'rb') as f:
+            data = aiohttp.FormData()
+            data.add_field('file', f, filename=filepath.name)
+            
+            try:
+                async with session.post('https://file.io', data=data) as resp:
+                    if resp.status != 200:
+                        raise Exception(f"Upload failed: {resp.status}")
+                    
+                    content_type = resp.headers.get('Content-Type', '')
+                    if 'json' not in content_type:
+                        text = await resp.text()
+                        raise Exception(f"Unexpected response: {text[:200]}")
+                    
+                    result = await resp.json()
+                    
+                    if not result.get('success'):
+                        raise Exception(f"Upload failed: {result.get('message', 'unknown error')}")
+                    
+                    return result['link']
+                    
+            except aiohttp.ClientError as e:
+                raise Exception(f"Network error: {e}")
+
+
+async def upload_to_gofile(filepath: Path) -> str:
+    """Alternative: Upload to gofile.io (more reliable)"""
+    async with aiohttp.ClientSession() as session:
+        # Get server
+        async with session.get('https://api.gofile.io/servers') as resp:
+            data = await resp.json()
+            server = data['data']['servers'][0]['name']
+        
+        # Upload file
+        with open(filepath, 'rb') as f:
+            form = aiohttp.FormData()
+            form.add_field('file', f, filename=filepath.name)
+            
+            async with session.post(f'https://{server}.gofile.io/contents/uploadfile', data=form) as resp:
+                result = await resp.json()
+                if result['status'] != 'ok':
+                    raise Exception(f"Upload failed: {result}")
+                
+                return result['data']['downloadPage']
 
 
 # ---------------------------------------------------------
@@ -245,8 +375,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
+    chat_id = update.effective_chat.id
 
-    context.user_data["yt_url"] = url   # <——— ФІКС
+    # Зберігаємо в обох місцях для сумісності
+    context.user_data["yt_url"] = url
+    USER_LINK[chat_id] = url
 
     keyboard = [
         [InlineKeyboardButton("🎵 Audio", callback_data="audio")],
@@ -265,41 +398,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    url = context.user_data.get("yt_url")  # <——— ФІКС
+    chat_id = update.effective_chat.id
+    mode = query.data
+
+    url = context.user_data.get("yt_url") or USER_LINK.get(chat_id)
 
     if not url:
-        await query.edit_message_text("Немає посилання. Надішліть URL ще раз.")
+        await query.edit_message_text("❌ Помилка: посилання не знайдено. Надішліть URL ще раз.")
         return
 
-    data = q.data
-
-    if data == AUDIO:
-        await q.edit_message_text("🎧 Завантажуємо аудіо...")
-        return await download(update, context, link, AUDIO)
-
-    if data == VIDEO:
-        await q.edit_message_text("🔎 Отримуємо формати...")
-        formats = await get_formats(link)
-
-        if not formats:
-            return await q.edit_message_text("⚠️ Не знайдено форматів.")
-
-        kb = [
-            [InlineKeyboardButton(f"{h}p", callback_data=f"{QUALITY}:{h}")]
-            for h in formats.keys()
+    if mode == VIDEO:
+        keyboard = [
+            [InlineKeyboardButton("360p", callback_data="video_360")],
+            [InlineKeyboardButton("480p", callback_data="video_480")],
+            [InlineKeyboardButton("720p", callback_data="video_720")],
         ]
-        return await q.edit_message_text(
-            "Оберіть якість:",
-            reply_markup=InlineKeyboardMarkup(kb)
+        await query.edit_message_text(
+            "Оберіть якість відео:\n(нижча якість = менший розмір)",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
-
-    if data.startswith(f"{QUALITY}:"):
-        height = int(data.split(":")[1])
-        formats = await get_formats(link)
-        fmt_id = formats.get(height)
-
-        await q.edit_message_text(f"🎬 Завантажуємо {height}p...")
-        return await download(update, context, link, VIDEO, fmt_id)
+    elif mode.startswith("video_"):
+        quality = mode.split("_")[1]
+        await download(update, context, url, VIDEO, video_fmt=quality)
+    elif mode == AUDIO:
+        await download(update, context, url, AUDIO)
 
 
 # ---------------------------------------------------------
@@ -315,8 +437,22 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
+    # Graceful shutdown handler
+    def signal_handler(signum, frame):
+        log.info(f"📡 Received signal {signum}, shutting down...")
+        release_lock()
+        POOL.shutdown(wait=True, cancel_futures=False)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
     log.info("🤖 Bot started")
-    app.run_polling(close_loop=False)
+    try:
+        app.run_polling(close_loop=False)
+    finally:
+        release_lock()
+        POOL.shutdown(wait=True)
 
 
 if __name__ == "__main__":
