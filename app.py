@@ -9,6 +9,7 @@ import asyncio
 import signal
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from telegram import (
@@ -79,6 +80,7 @@ lock_or_exit()
 # STORAGE
 # ---------------------------------------------------------
 USER_LINK = {}   # chat_id → link
+ACTIVE_DOWNLOADS = set()  # файли, які зараз завантажуються
 
 
 # ---------------------------------------------------------
@@ -137,6 +139,65 @@ async def get_formats(url: str):
 
 
 # ---------------------------------------------------------
+# CLEANUP HELPERS
+# ---------------------------------------------------------
+def cleanup_old_files(download_dir: Path, max_age_minutes: int = 30):
+    """Видаляє файли старіші за max_age_minutes, крім активних завантажень"""
+    if not download_dir.exists():
+        return
+    
+    now = datetime.now()
+    cutoff = now - timedelta(minutes=max_age_minutes)
+    
+    cleaned = 0
+    for file in download_dir.iterdir():
+        if not file.is_file():
+            continue
+            
+        # Не чіпаємо активні завантаження
+        if str(file) in ACTIVE_DOWNLOADS:
+            continue
+        
+        # Перевіряємо час модифікації
+        mtime = datetime.fromtimestamp(file.stat().st_mtime)
+        if mtime < cutoff:
+            try:
+                file.unlink()
+                cleaned += 1
+                log.info(f"🧹 Cleaned old file: {file.name}")
+            except Exception as e:
+                log.warning(f"Failed to clean {file.name}: {e}")
+    
+    if cleaned > 0:
+        log.info(f"🧹 Cleaned {cleaned} old files")
+
+
+def cleanup_all_except_active(download_dir: Path):
+    """Видаляє всі файли крім активних завантажень"""
+    if not download_dir.exists():
+        return
+    
+    cleaned = 0
+    for file in download_dir.iterdir():
+        if not file.is_file():
+            continue
+            
+        # Не чіпаємо активні завантаження
+        if str(file) in ACTIVE_DOWNLOADS:
+            continue
+        
+        try:
+            file.unlink()
+            cleaned += 1
+            log.info(f"🧹 Cleaned: {file.name}")
+        except Exception as e:
+            log.warning(f"Failed to clean {file.name}: {e}")
+    
+    if cleaned > 0:
+        log.info(f"🧹 Cleaned {cleaned} files")
+
+
+# ---------------------------------------------------------
 # DOWNLOAD (THREAD) + PROGRESS (ASYNC)
 # ---------------------------------------------------------
 async def download(
@@ -151,6 +212,9 @@ async def download(
 
     download_dir = Path("downloads")
     download_dir.mkdir(exist_ok=True)
+
+    # Очищуємо старі файли перед початком
+    cleanup_old_files(download_dir, max_age_minutes=30)
 
     last_update = [0]
     main_loop = asyncio.get_running_loop()
@@ -227,79 +291,94 @@ async def download(
 
     fp = Path(filepath)
     
-    # Verify file exists
-    if not fp.exists():
-        log.error(f"File not found: {filepath}")
-        await status_msg.edit_text("❌ Помилка: файл не знайдено після конвертації")
-        return
-
-    # Clean filename: replace URL encoding and special chars with underscores
-    clean_name = fp.name
-    clean_name = clean_name.replace("%20", "_")  # spaces
-    clean_name = re.sub(r'%[0-9A-Fa-f]{2}', '_', clean_name)  # other URL encoding
-    clean_name = re.sub(r'[^\w\s._-]', '_', clean_name)  # special chars
-    clean_name = re.sub(r'_+', '_', clean_name)  # multiple underscores
-    clean_name = clean_name.strip('_')  # trim edges
+    # Додаємо файл до активних завантажень
+    ACTIVE_DOWNLOADS.add(str(fp))
     
-    # Rename file if needed
-    if clean_name != fp.name:
-        new_fp = fp.parent / clean_name
-        fp.rename(new_fp)
-        fp = new_fp
-        log.info(f"Renamed to: {clean_name}")
+    try:
+        # Verify file exists
+        if not fp.exists():
+            log.error(f"File not found: {filepath}")
+            await status_msg.edit_text("❌ Помилка: файл не знайдено після конвертації")
+            return
 
-    # Check file size
-    file_size = fp.stat().st_size
-    max_size = 50 * 1024 * 1024  # 50 MB
+        # Clean filename: replace URL encoding and special chars with underscores
+        clean_name = fp.name
+        clean_name = clean_name.replace("%20", "_")
+        clean_name = re.sub(r'%[0-9A-Fa-f]{2}', '_', clean_name)
+        clean_name = re.sub(r'[^\w\s._-]', '_', clean_name)
+        clean_name = re.sub(r'_+', '_', clean_name)
+        clean_name = clean_name.strip('_')
+        
+        # Rename file if needed
+        if clean_name != fp.name:
+            # Видаляємо старий шлях з активних
+            ACTIVE_DOWNLOADS.discard(str(fp))
+            
+            new_fp = fp.parent / clean_name
+            fp.rename(new_fp)
+            fp = new_fp
+            
+            # Додаємо новий шлях до активних
+            ACTIVE_DOWNLOADS.add(str(fp))
+            log.info(f"Renamed to: {clean_name}")
 
-    # Upload large files to GoFile
-    if file_size > max_size:
-        file_type = "Відео" if mode == VIDEO else "Аудіо"
-        await status_msg.edit_text(f"📤 {file_type} завелике, завантажую на GoFile.io...")
+        # Check file size
+        file_size = fp.stat().st_size
+        max_size = 50 * 1024 * 1024  # 50 MB
+
+        # Upload large files to GoFile
+        if file_size > max_size:
+            file_type = "Відео" if mode == VIDEO else "Аудіо"
+            await status_msg.edit_text(f"📤 {file_type} завелике, завантажую на GoFile.io...")
+            try:
+                link = await upload_to_gofile(fp)
+                await status_msg.edit_text(
+                    f"✅ {file_type} завелике для Telegram ({file_size / 1024 / 1024:.1f} MB).\n\n"
+                    f"🔗 Файл було завантажено на gofile.io: {link}\n\n"
+                )
+            except Exception as e:
+                log.error(f"Upload to GoFile failed: {e}")
+                await status_msg.edit_text(
+                    f"❌ Не вдалось завантажити: {e}\n\n"
+                    f"{'Спробуйте нижчу якість або коротше відео.' if mode == VIDEO else 'Спробуйте коротшу аудіодоріжку.'}"
+                )
+            return
+
+        await status_msg.edit_text("📤 Завантаження в Telegram...")
+
         try:
-            link = await upload_to_gofile(fp)
-            await status_msg.edit_text(
-                f"✅ {file_type} завелике для Telegram ({file_size / 1024 / 1024:.1f} MB).\n\n"
-                f"🔗 Файл було завантажено на gofile.io: {link}\n\n"
-            )
+            with fp.open("rb") as f:
+                if mode == AUDIO:
+                    await context.bot.send_audio(
+                        chat_id,
+                        audio=InputFile(f, filename=fp.name)
+                    )
+                else:
+                    await context.bot.send_video(
+                        chat_id,
+                        video=InputFile(f, filename=fp.name),
+                        supports_streaming=True
+                    )
+
+            # Видаляємо статусне повідомлення після успішного завантаження
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass  # Ігноруємо помилки видалення
+                
         except Exception as e:
-            log.error(f"Upload to GoFile failed: {e}")
-            await status_msg.edit_text(
-                f"❌ Не вдалось завантажити: {e}\n\n"
-                f"{'Спробуйте нижчу якість або коротше відео.' if mode == VIDEO else 'Спробуйте коротшу аудіодоріжку.'}"
-            )
-        finally:
-            fp.unlink()
-        return
-
-    await status_msg.edit_text("📤 Завантаження в Telegram...")
-
-    try:
-        with fp.open("rb") as f:
-            if mode == AUDIO:
-                await context.bot.send_audio(
-                    chat_id,
-                    audio=InputFile(f, filename=fp.name),
-                    caption="✅ Готово"
-                )
-            else:
-                await context.bot.send_video(
-                    chat_id,
-                    video=InputFile(f, filename=fp.name),
-                    caption="✅ Готово",
-                    supports_streaming=True
-                )
-
-        await status_msg.edit_text("✅ Завантажено в Telegram")
-    except Exception as e:
-        await status_msg.edit_text(f"❌ Помилка відправки: {e}")
-        log.error(f"Upload error: {e}")
+            await status_msg.edit_text(f"❌ Помилка відправки: {e}")
+            log.error(f"Upload error: {e}")
     
-    # Clean up
-    try:
-        fp.unlink()
-    except:
-        pass
+    finally:
+        # Видаляємо з активних і прибираємо файл
+        ACTIVE_DOWNLOADS.discard(str(fp))
+        try:
+            if fp.exists():
+                fp.unlink()
+                log.info(f"🗑️ Removed: {fp.name}")
+        except Exception as e:
+            log.warning(f"Failed to remove {fp.name}: {e}")
 
 
 async def upload_to_fileio(filepath: Path) -> str:
@@ -418,9 +497,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     elif mode.startswith("video_"):
+        # Видаляємо повідомлення з вибором якості
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        
         quality = mode.split("_")[1]
         await download(update, context, url, VIDEO, video_fmt=quality)
     elif mode == AUDIO:
+        # Видаляємо повідомлення "Що завантажити?"
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        
         await download(update, context, url, AUDIO)
 
 
@@ -437,11 +528,18 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
+    # Очищуємо всі старі файли при старті
+    download_dir = Path("downloads")
+    download_dir.mkdir(exist_ok=True)
+    cleanup_all_except_active(download_dir)
+
     # Graceful shutdown handler
     def signal_handler(signum, frame):
         log.info(f"📡 Received signal {signum}, shutting down...")
         release_lock()
         POOL.shutdown(wait=True, cancel_futures=False)
+        # Очищуємо при виході
+        cleanup_all_except_active(download_dir)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, signal_handler)
@@ -453,6 +551,7 @@ def main():
     finally:
         release_lock()
         POOL.shutdown(wait=True)
+        cleanup_all_except_active(download_dir)
 
 
 if __name__ == "__main__":
