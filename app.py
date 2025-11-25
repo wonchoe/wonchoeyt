@@ -437,13 +437,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     link = msg.text.strip()
 
-    yt_re = re.compile(r"(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[^\s]+")
-    m = yt_re.search(link)
-    if not m:
-        await msg.reply_text("Будь ласка, надішліть YouTube лінк.")
+    # Знайти URL
+    url_match = re.search(r'https?://[^\s]+', link)
+    if not url_match:
+        await msg.reply_text("Будь ласка, надішліть посилання.")
         return
 
-    USER_LINK[update.effective_chat.id] = m.group(0)
+    url = url_match.group(0)
+
+    # Перевіряємо чи yt-dlp може його обробити
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:
+        await msg.reply_text("❌ Це посилання не підтримується.")
+        return
+
+    # Зберігаємо
+    context.user_data["yt_url"] = url
+    USER_LINK[update.effective_chat.id] = url
 
     kb = [
         [InlineKeyboardButton("🎧 Audio", callback_data=AUDIO)],
