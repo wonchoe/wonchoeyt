@@ -243,18 +243,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text("Що завантажити?", reply_markup=InlineKeyboardMarkup(kb))
 
 
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text.strip()
+
+    context.user_data["yt_url"] = url   # <——— ФІКС
+
+    keyboard = [
+        [InlineKeyboardButton("🎵 Audio", callback_data="audio")],
+        [InlineKeyboardButton("🎬 Video", callback_data="video")],
+    ]
+
+    await update.message.reply_text(
+        "Виберіть формат:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
 # ---------------------------------------------------------
 # CALLBACK HANDLER
 # ---------------------------------------------------------
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
+    query = update.callback_query
+    await query.answer()
 
-    chat_id = update.effective_chat.id
-    link = USER_LINK.get(chat_id)
+    url = context.user_data.get("yt_url")  # <——— ФІКС
 
-    if not link:
-        await q.edit_message_text("Немає посилання. Надішліть знову.")
+    if not url:
+        await query.edit_message_text("Немає посилання. Надішліть URL ще раз.")
         return
 
     data = q.data
