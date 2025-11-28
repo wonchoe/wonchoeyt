@@ -115,7 +115,8 @@ async def get_formats(url: str):
         "nocheckcertificate": True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "web", "android"],
+                "player_client": ["web"],  # ✅ Тільки web
+                "skip": ["hls", "dash"],
             }
         }
     }
@@ -255,17 +256,22 @@ async def download(
             "quiet": True,
             "nocheckcertificate": True,
             "progress_hooks": [progress_hook],
-            # Clean up filenames
-            "restrictfilenames": True,  # ASCII only
+            "restrictfilenames": True,
+            # ✅ Тільки web client
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["web"],
+                    "skip": ["hls", "dash"],
+                }
+            }
         }
 
         if mode == AUDIO:
-            # Download best audio + convert to MP3
             opts["format"] = "bestaudio/best"
             opts["postprocessors"] = [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "192",  # 192kbps = good quality
+                "preferredquality": "192",
             }]
             opts["writethumbnail"] = False
             opts["writesubtitles"] = False
@@ -274,7 +280,7 @@ async def download(
             if video_fmt:
                 opts["format"] = f"bestvideo[height<={video_fmt}]+bestaudio/best"
             else:
-                opts["format"] = "bestvideo+bestaudio"
+                opts["format"] = "bestvideo+bestaudio/best"
             opts["merge_output_format"] = "mp4"
 
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -472,7 +478,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "nocheckcertificate": True,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["ios", "android", "web"],
+                    "player_client": ["web"],  # ✅ Тільки web (підтримує cookies)
                     "skip": ["hls", "dash"],
                 }
             }
@@ -482,6 +488,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            
+            # ✅ Перевірка чи є аудіо/відео формати
+            has_formats = any(
+                f.get('vcodec') != 'none' or f.get('acodec') != 'none'
+                for f in info.get('formats', [])
+            )
+            
+            if not has_formats:
+                log.error("❌ No audio/video formats available, only images")
+                await msg.reply_text(
+                    "❌ **YouTube заблокував доступ**\n\n"
+                    "Доступні тільки зображення (thumbnails).\n\n"
+                    "🔄 Спробуйте:\n"
+                    "• Інше відео\n"
+                    "• Почекати 10-15 хвилин\n"
+                    "• Повідомити адміна про проблему",
+                    parse_mode="Markdown"
+                )
+                return
             
             # ✅ Логування інфо
             log.info(f"✅ Info extracted successfully")
