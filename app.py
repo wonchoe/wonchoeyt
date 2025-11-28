@@ -478,7 +478,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "nocheckcertificate": True,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["web"],  # ✅ Тільки web (підтримує cookies)
+                    "player_client": ["web"],
                     "skip": ["hls", "dash"],
                 }
             }
@@ -490,30 +490,60 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             info = ydl.extract_info(url, download=False)
             
             # ✅ Перевірка чи є аудіо/відео формати
+            formats = info.get('formats', [])
             has_formats = any(
                 f.get('vcodec') != 'none' or f.get('acodec') != 'none'
-                for f in info.get('formats', [])
+                for f in formats
             )
             
             if not has_formats:
                 log.error("❌ No audio/video formats available, only images")
-                await msg.reply_text(
-                    "❌ **YouTube заблокував доступ**\n\n"
-                    "Доступні тільки зображення (thumbnails).\n\n"
-                    "🔄 Спробуйте:\n"
-                    "• Інше відео\n"
-                    "• Почекати 10-15 хвилин\n"
-                    "• Повідомити адміна про проблему",
-                    parse_mode="Markdown"
-                )
-                return
+                log.info(f"Available formats: {[f.get('format_id') for f in formats]}")
+                
+                # ✅ Спробувати через embed (fallback)
+                try:
+                    log.info("🔄 Trying embed extractor as fallback...")
+                    opts_embed = opts.copy()
+                    opts_embed["extractor_args"] = {
+                        "youtube": {
+                            "player_client": ["web_embedded"],
+                            "skip": ["hls", "dash"],
+                        }
+                    }
+                    
+                    with yt_dlp.YoutubeDL(opts_embed) as ydl_embed:
+                        info = ydl_embed.extract_info(url, download=False)
+                        formats = info.get('formats', [])
+                        has_formats = any(
+                            f.get('vcodec') != 'none' or f.get('acodec') != 'none'
+                            for f in formats
+                        )
+                        
+                        if not has_formats:
+                            raise Exception("Still no formats")
+                        
+                        log.info("✅ Embed extractor worked!")
+                        
+                except Exception as embed_err:
+                    log.error(f"❌ Embed fallback failed: {embed_err}")
+                    await msg.reply_text(
+                        "❌ **YouTube заблокував доступ**\n\n"
+                        "Доступні тільки зображення (thumbnails).\n\n"
+                        "🔄 Спробуйте:\n"
+                        "• Інше відео\n"
+                        "• Почекати 10-15 хвилин\n"
+                        "• Повідомити адміна (@username)\n\n"
+                        "⚠️ YouTube посилив захист від ботів",
+                        parse_mode="Markdown"
+                    )
+                    return
             
             # ✅ Логування інфо
             log.info(f"✅ Info extracted successfully")
             log.info(f"   Title: {info.get('title', 'N/A')[:50]}")
             log.info(f"   Uploader: {info.get('uploader', 'N/A')}")
             log.info(f"   Duration: {info.get('duration', 0)}s")
-            log.info(f"   Formats: {len(info.get('formats', []))}")
+            log.info(f"   Formats: {len(formats)}")
             
     except yt_dlp.utils.DownloadError as e:
         error_msg = str(e)
