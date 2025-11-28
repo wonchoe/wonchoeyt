@@ -444,13 +444,106 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     url = url_match.group(0)
+    
+    # ✅ Логування URL
+    log.info(f"📥 Received URL: {url}")
+
+    # ✅ Перевірка cookies
+    cookies_path = Path("/tmp/cookies.txt")
+    if cookies_path.exists():
+        cookie_age = datetime.now() - datetime.fromtimestamp(cookies_path.stat().st_mtime)
+        log.info(f"🍪 Cookies found, age: {cookie_age.days}d {cookie_age.seconds // 3600}h")
+        
+        # Показуємо перші 5 рядків cookies для дебагу
+        try:
+            with open(cookies_path, 'r') as f:
+                lines = f.readlines()[:5]
+                log.info(f"🍪 First cookies lines: {[l.strip()[:50] for l in lines if not l.startswith('#')]}")
+        except Exception as e:
+            log.warning(f"⚠️ Can't read cookies: {e}")
+    else:
+        log.warning("⚠️ No cookies.txt found at /tmp/cookies.txt")
 
     # Перевіряємо чи yt-dlp може його обробити
     try:
-        with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
+        opts = {
+            "quiet": True,
+            "cookiefile": "/tmp/cookies.txt",
+            "nocheckcertificate": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["ios", "android", "web"],
+                    "skip": ["hls", "dash"],
+                }
+            }
+        }
+        
+        log.info(f"🔍 Extracting info with opts: {opts}")
+        
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
-    except Exception:
-        await msg.reply_text("❌ Це посилання не підтримується.")
+            
+            # ✅ Логування інфо
+            log.info(f"✅ Info extracted successfully")
+            log.info(f"   Title: {info.get('title', 'N/A')[:50]}")
+            log.info(f"   Uploader: {info.get('uploader', 'N/A')}")
+            log.info(f"   Duration: {info.get('duration', 0)}s")
+            log.info(f"   Formats: {len(info.get('formats', []))}")
+            
+    except yt_dlp.utils.DownloadError as e:
+        error_msg = str(e)
+        log.error(f"❌ DownloadError: {error_msg}")
+        
+        # Детальні повідомлення про помилки
+        if "Sign in to confirm" in error_msg or "bot" in error_msg.lower():
+            await msg.reply_text(
+                "❌ **YouTube bot detection**\n\n"
+                "YouTube заблокував доступ.\n\n"
+                "🔄 Спробуйте:\n"
+                "• Почекати 5-10 хвилин\n"
+                "• Інше відео\n"
+                "• Повідомити адміна про проблему\n\n"
+                f"Помилка: `{error_msg[:150]}`",
+                parse_mode="Markdown"
+            )
+        elif "Video unavailable" in error_msg:
+            await msg.reply_text(
+                "❌ **Відео недоступне**\n\n"
+                "Можливі причини:\n"
+                "• Відео приватне\n"
+                "• Відео видалене\n"
+                "• Географічні обмеження\n\n"
+                f"Деталі: `{error_msg[:150]}`",
+                parse_mode="Markdown"
+            )
+        elif "429" in error_msg or "Too Many Requests" in error_msg:
+            await msg.reply_text(
+                "❌ **Забагато запитів**\n\n"
+                "YouTube тимчасово заблокував доступ.\n"
+                "Почекайте 10-15 хвилин.",
+                parse_mode="Markdown"
+            )
+        else:
+            await msg.reply_text(
+                f"❌ **Помилка YouTube**\n\n"
+                f"`{error_msg[:200]}`\n\n"
+                f"Спробуйте інше відео або повідомте адміна.",
+                parse_mode="Markdown"
+            )
+        return
+        
+    except Exception as e:
+        error_msg = str(e)
+        log.error(f"❌ Unexpected error: {error_msg}")
+        log.exception("Full traceback:")
+        
+        await msg.reply_text(
+            f"❌ **Несподівана помилка**\n\n"
+            f"Тип: `{type(e).__name__}`\n"
+            f"Повідомлення: `{error_msg[:150]}`\n\n"
+            f"Це посилання не підтримується або є проблема з сервером.",
+            parse_mode="Markdown"
+        )
         return
 
     # Зберігаємо
