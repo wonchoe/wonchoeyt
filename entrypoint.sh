@@ -100,7 +100,18 @@ fi
 # Перевірка Node.js для yt-dlp JavaScript challenges
 if command -v node &> /dev/null; then
     NODE_VERSION=$(node --version)
-    echo "✅ Node.js detected: $NODE_VERSION"
+    NODE_PATH=$(which node)
+    echo "✅ Node.js detected: $NODE_VERSION at $NODE_PATH"
+    
+    # Переконуємось що Node.js в PATH
+    export PATH="/usr/bin:$PATH"
+    
+    # Тест JavaScript execution
+    if node -e "console.log('JS OK')" &> /dev/null; then
+        echo "✅ Node.js JavaScript execution works"
+    else
+        echo "⚠️  Node.js found but JS execution failed"
+    fi
 else
     echo "⚠️  Warning: Node.js not found - YouTube signature solving may fail"
 fi

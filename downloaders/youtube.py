@@ -114,24 +114,24 @@ class YouTubeDownloader(BaseDownloader):
             opts = {
                 "cookiefile": cookies_path,
                 "outtmpl": str(download_dir / "%(title)s.%(ext)s"),
-                "quiet": True,
+                "quiet": False,  # Показуємо логи для діагностики challenge
+                "verbose": True,  # Детальні логи
                 "nocheckcertificate": True,
                 "progress_hooks": [progress_hook],
                 "restrictfilenames": True,
                 "noplaylist": True,
-                # YouTube specific options - використовуємо ios для обходу signature
+                # YouTube specific options - використовуємо mweb (mobile web) для обходу
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["ios", "web"],
-                        "skip": ["hls", "dash"],
+                        "player_client": ["mweb", "web"],
+                        "skip": ["hls"],
                     }
                 },
-                # Дозволяємо unplayable formats як запасний варіант
-                "allow_unplayable_formats": True,
             }
             
             if mode == "audio":
-                opts["format"] = "bestaudio/best"
+                # Максимально м'який fallback для audio
+                opts["format"] = "bestaudio/bestaudio*/best/best*"
                 opts["postprocessors"] = [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
@@ -140,15 +140,21 @@ class YouTubeDownloader(BaseDownloader):
                 opts["writethumbnail"] = False
                 opts["writesubtitles"] = False
             else:
-                # Більш м'який fallback для відео форматів
+                # Максимально агресивний fallback для відео
                 if video_quality:
                     opts["format"] = (
+                        f"bestvideo*[height<={video_quality}]+bestaudio*/"
                         f"bestvideo[height<={video_quality}]+bestaudio/"
+                        f"best*[height<={video_quality}]/"
                         f"best[height<={video_quality}]/"
-                        "best"
+                        "best*/best"
                     )
                 else:
-                    opts["format"] = "bestvideo+bestaudio/best"
+                    opts["format"] = (
+                        "bestvideo*+bestaudio*/"
+                        "bestvideo+bestaudio/"
+                        "best*/best"
+                    )
                 opts["merge_output_format"] = "mp4"
             
             with yt_dlp.YoutubeDL(opts) as ydl:
