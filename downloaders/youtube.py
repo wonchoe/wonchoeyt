@@ -98,32 +98,18 @@ class YouTubeDownloader(BaseDownloader):
             except Exception as e:
                 log.warning(f"⚠️  Could not locate Node.js: {e}")
             
-            # Перевірка cookies файлу
+            # Стратегія: спочатку без cookies (для публічних відео), потім з cookies якщо потрібно
             cookies_path = "/tmp/ytdl-cookies.txt"
-            if os.path.exists(cookies_path):
-                cookie_size = os.path.getsize(cookies_path)
-                with open(cookies_path, 'r') as f:
-                    cookie_lines = [line for line in f if line.strip() and not line.startswith('#')]
-                    cookie_count = len(cookie_lines)
-                    
-                    # Перевіряємо критичні YouTube cookies
-                    cookie_names = [line.split('\t')[5] if len(line.split('\t')) > 5 else '' for line in cookie_lines]
-                    critical_cookies = ['__Secure-3PSID', '__Secure-1PSID', 'SAPISID', 'SSID']
-                    found_critical = [c for c in critical_cookies if c in cookie_names]
-                    missing_critical = [c for c in critical_cookies if c not in cookie_names]
-                    
-                log.info(f"🍪 YouTube cookies loaded: {cookie_count} cookies ({cookie_size} bytes)")
-                if found_critical:
-                    log.info(f"✅ Critical cookies found: {', '.join(found_critical)}")
-                if missing_critical:
-                    log.warning(f"⚠️  Missing critical cookies: {', '.join(missing_critical)}")
-                    log.warning("   YouTube may block requests without these cookies")
-            else:
-                log.warning("⚠️  YouTube cookies NOT FOUND at /tmp/ytdl-cookies.txt")
-                log.warning("   Bot may encounter 'Sign in to confirm you're not a bot' errors")
+            use_cookies = os.path.exists(cookies_path)
             
+            if use_cookies:
+                cookie_size = os.path.getsize(cookies_path)
+                log.info(f"🍪 YouTube cookies available: {cookie_size} bytes")
+            else:
+                log.info("🔓 No cookies - will try without authentication (public videos only)")
+            
+            # Базова конфігурація без cookies
             opts = {
-                "cookiefile": cookies_path,
                 "outtmpl": str(download_dir / "%(title)s.%(ext)s"),
                 "quiet": False,
                 "verbose": False,
@@ -131,12 +117,24 @@ class YouTubeDownloader(BaseDownloader):
                 "progress_hooks": [progress_hook],
                 "restrictfilenames": True,
                 "noplaylist": True,
+                # Використовуємо android client для обходу Sign in challenge
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android", "web"],
+                        "skip": ["hls", "dash"],
+                    }
+                },
             }
+            
+            # Додаємо cookies тільки якщо вони є
+            if use_cookies:
+                opts["cookiefile"] = cookies_path
             
             # Якщо Node.js знайдено, додаємо в конфігурацію для JS challenge solving
             if node_path:
                 opts["exec_cmd"] = {"node": node_path}
                 log.info(f"✅ Node.js configured for yt-dlp at: {node_path}")
+
 
             
             if mode == "audio":
@@ -167,32 +165,69 @@ class YouTubeDownloader(BaseDownloader):
                     )
                 opts["merge_output_format"] = "mp4"
             
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                
-                if not info:
-                    raise Exception("Failed to extract video info")
-                
-                # Для audio режиму файл вже конвертований в mp3
-                if mode == "audio":
-                    # prepare_filename поверне .mp4, але ffmpeg вже конвертував в .mp3
-                    base_path = ydl.prepare_filename(info)
-                    mp3_path = str(Path(base_path).with_suffix(".mp3"))
+            # Спроба завантаження з retry механізмом
+            last_error = None
+            attempts = []
+            
+            # Спроба 1: з cookies (якщо є)
+            if use_cookies:
+                attempts.append(("with cookies", opts.copy()))
+            
+            # Спроба 2: без cookies (для публічних відео)
+            opts_no_cookies = opts.copy()
+            if "cookiefile" in opts_no_cookies:
+                del opts_no_cookies["cookiefile"]
+            attempts.append(("without cookies", opts_no_cookies))
+            
+            for attempt_name, attempt_opts in attempts:
+                try:
+                    log.info(f"🔄 Attempting download {attempt_name}...")
                     
-                    # Перевіряємо чи файл існує
-                    if not Path(mp3_path).exists():
-                        # Якщо mp3 не знайдено, шукаємо будь-який аудіо файл
-                        audio_files = list(download_dir.glob("*.mp3"))
-                        if audio_files:
-                            mp3_path = str(audio_files[-1])  # Найновіший файл
+                    with yt_dlp.YoutubeDL(attempt_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        
+                        if not info:
+                            raise Exception("Failed to extract video info")
+                        
+                        # Для audio режиму файл вже конвертований в mp3
+                        if mode == "audio":
+                            # prepare_filename поверне .mp4, але ffmpeg вже конвертував в .mp3
+                            base_path = ydl.prepare_filename(info)
+                            mp3_path = str(Path(base_path).with_suffix(".mp3"))
+                            
+                            # Перевіряємо чи файл існує
+                            if not Path(mp3_path).exists():
+                                # Якщо mp3 не знайдено, шукаємо будь-який аудіо файл
+                                audio_files = list(download_dir.glob("*.mp3"))
+                                if audio_files:
+                                    mp3_path = str(audio_files[-1])  # Найновіший файл
+                                else:
+                                    raise Exception(f"Audio file not found: {mp3_path}")
+                            
+                            log.info(f"✅ Downloaded successfully {attempt_name}")
+                            return mp3_path, mode
                         else:
-                            raise Exception(f"Audio file not found: {mp3_path}")
+                            # Для відео
+                            original_path = ydl.prepare_filename(info)
+                            log.info(f"✅ Downloaded successfully {attempt_name}")
+                            return original_path, mode
+                
+                except Exception as e:
+                    last_error = e
+                    error_msg = str(e)
+                    log.warning(f"⚠️ Attempt {attempt_name} failed: {error_msg}")
                     
-                    return mp3_path, mode
-                else:
-                    # Для відео
-                    original_path = ydl.prepare_filename(info)
-                return original_path, mode
+                    # Якщо це остання спроба - кидаємо помилку
+                    if attempt_name == attempts[-1][0]:
+                        log.error(f"❌ All download attempts failed")
+                        raise last_error
+                    
+                    # Інакше пробуємо наступний спосіб
+                    log.info(f"🔄 Trying next method...")
+                    continue
+            
+            # Якщо дійшли сюди - щось пішло не так
+            raise Exception("All download attempts exhausted")
         
         loop = asyncio.get_running_loop()
         filepath, media_type = await loop.run_in_executor(POOL, sync_download)
