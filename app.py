@@ -33,6 +33,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("ytbot")
 
+# Вимикаємо логування HTTP запитів з токеном
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+
 
 # ---------------------------------------------------------
 # ENV

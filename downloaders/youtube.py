@@ -87,6 +87,17 @@ class YouTubeDownloader(BaseDownloader):
                 )
         
         def sync_download():
+            # Переконуємося що Node.js доступний для yt-dlp subprocess
+            import subprocess
+            node_path = None
+            try:
+                node_result = subprocess.run(['which', 'node'], capture_output=True, text=True, timeout=2)
+                if node_result.returncode == 0:
+                    node_path = node_result.stdout.strip()
+                    log.info(f"🟢 Node.js found at: {node_path}")
+            except Exception as e:
+                log.warning(f"⚠️  Could not locate Node.js: {e}")
+            
             # Перевірка cookies файлу
             cookies_path = "/tmp/ytdl-cookies.txt"
             if os.path.exists(cookies_path):
@@ -114,22 +125,19 @@ class YouTubeDownloader(BaseDownloader):
             opts = {
                 "cookiefile": cookies_path,
                 "outtmpl": str(download_dir / "%(title)s.%(ext)s"),
-                "quiet": False,  # Показуємо логи для діагностики challenge
-                "verbose": True,  # Детальні логи
+                "quiet": False,
+                "verbose": False,
                 "nocheckcertificate": True,
                 "progress_hooks": [progress_hook],
                 "restrictfilenames": True,
                 "noplaylist": True,
-                # Явно вказуємо Node.js для JS execution
-                "exec_cmd": {"node": "/usr/bin/node"},
-                # YouTube specific options - використовуємо android_creator замість mweb
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["android_creator", "web"],
-                        "skip": ["hls"],
-                    }
-                },
             }
+            
+            # Якщо Node.js знайдено, додаємо в конфігурацію для JS challenge solving
+            if node_path:
+                opts["exec_cmd"] = {"node": node_path}
+                log.info(f"✅ Node.js configured for yt-dlp at: {node_path}")
+
             
             if mode == "audio":
                 # Максимально м'який fallback для audio
