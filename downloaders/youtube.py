@@ -98,30 +98,16 @@ class YouTubeDownloader(BaseDownloader):
             except Exception as e:
                 log.warning(f"⚠️  Could not locate Node.js: {e}")
             
-            # Перевірка OAuth токену (пріоритет над cookies)
-            oauth_token = None
-            oauth_token_file = Path("/tmp/youtube_oauth_token.json")
-            if oauth_token_file.exists():
-                try:
-                    import json
-                    token_data = json.loads(oauth_token_file.read_text())
-                    oauth_token = token_data.get("access_token")
-                    if oauth_token:
-                        log.info(f"🔐 YouTube OAuth token found")
-                except Exception as e:
-                    log.warning(f"⚠️ Failed to load OAuth token: {e}")
-            
-            # Стратегія: OAuth > cookies > без авторизації
+            # Стратегія: cookies > різні player clients (OAuth deprecated!)
             cookies_path = "/var/www/ytdl-cookies.txt"
-            use_cookies = os.path.exists(cookies_path) and not oauth_token
+            use_cookies = os.path.exists(cookies_path)
             
-            if oauth_token:
-                log.info("🔐 Using OAuth authentication (most reliable)")
-            elif use_cookies:
+            if use_cookies:
                 cookie_size = os.path.getsize(cookies_path)
                 log.info(f"🍪 YouTube cookies available: {cookie_size} bytes")
             else:
-                log.info("🔓 No authentication - will try public access only")
+                log.warning("⚠️ No cookies - YouTube downloads may fail!")
+
             
             # Базова конфігурація
             opts = {
@@ -140,18 +126,6 @@ class YouTubeDownloader(BaseDownloader):
                     }
                 },
             }
-            
-            # Додаємо OAuth токен якщо є (найвищий пріоритет)
-            if oauth_token:
-                opts["username"] = "oauth2"
-                opts["password"] = ""
-                # Додаємо токен через http headers
-                opts["http_headers"] = {
-                    "Authorization": f"Bearer {oauth_token}"
-                }
-            # Інакше cookies якщо є
-            elif use_cookies:
-                opts["cookiefile"] = cookies_path
             
             # Якщо Node.js знайдено, додаємо в конфігурацію для JS challenge solving
             if node_path:
@@ -194,23 +168,8 @@ class YouTubeDownloader(BaseDownloader):
             # Різні стратегії обходу YouTube блокування
             strategies = []
             
-            # ПРІОРИТЕТ 1: OAuth (якщо є токен)
-            if oauth_token:
-                opts_oauth = opts.copy()
-                opts_oauth["username"] = "oauth2"
-                opts_oauth["password"] = ""
-                opts_oauth["http_headers"] = {
-                    "Authorization": f"Bearer {oauth_token}"
-                }
-                opts_oauth["extractor_args"] = {
-                    "youtube": {
-                        "player_client": ["web", "android"],
-                    }
-                }
-                strategies.append(("OAuth (most reliable)", opts_oauth))
-            
-            # ПРІОРИТЕТ 2: Cookies (якщо є і немає OAuth)
-            elif use_cookies:
+            # ПРІОРИТЕТ 1: Cookies з android client (НАЙКРАЩЕ)
+            if use_cookies:
                 opts_with_cookies = opts.copy()
                 opts_with_cookies["cookiefile"] = cookies_path
                 opts_with_cookies["extractor_args"] = {
