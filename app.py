@@ -206,7 +206,7 @@ async def download_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE,
             
             # Перевіряємо загальний розмір для альбомів
             total_size = sum(fp.stat().st_size for fp in files if fp.exists())
-            max_size = 50 * 1024 * 1024  # 50 MB per file
+            max_size = 2 * 1024 * 1024 * 1024  # 2 GB per file (custom API server)
             
             # Відправляємо як media group якщо це альбом і всі файли підходять
             if media_type in ["photo_album", "video_album", "mixed_album"] and len(files) > 1:
@@ -327,8 +327,8 @@ async def download_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             
             file_size = fp.stat().st_size
             
-            # Якщо файл більше 50MB - завантажуємо на gofile.io
-            if file_size > 50 * 1024 * 1024:
+            # Якщо файл більше 2GB - завантажуємо на gofile.io
+            if file_size > 2 * 1024 * 1024 * 1024:
                 await safe_edit_message(status_msg, f"📤 Файл завеликий ({file_size / 1024 / 1024:.1f} MB), завантажую на gofile.io...")
                 link = await upload_to_gofile(fp)
                 await context.bot.send_message(
@@ -417,8 +417,8 @@ async def download_tiktok(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
             
             file_size = fp.stat().st_size
             
-            # Якщо файл більше 50MB - завантажуємо на gofile.io
-            if file_size > 50 * 1024 * 1024:
+            # Якщо файл більше 2GB - завантажуємо на gofile.io
+            if file_size > 2 * 1024 * 1024 * 1024:
                 await safe_edit_message(status_msg, f"📤 Файл завеликий ({file_size / 1024 / 1024:.1f} MB), завантажую на gofile.io...")
                 link = await upload_to_gofile(fp)
                 await context.bot.send_message(
@@ -503,7 +503,7 @@ async def download_youtube(
                 return
             
             file_size = fp.stat().st_size
-            max_size = 50 * 1024 * 1024
+            max_size = 2 * 1024 * 1024 * 1024  # 2 GB (custom API server)
             
             if file_size > max_size:
                 await status_msg.edit_text(f"📤 Файл завеликий, завантажую на GoFile.io...")
@@ -599,7 +599,12 @@ def main():
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
     
-    app = ApplicationBuilder().token(token).build()
+    # Custom Telegram Bot API server з підтримкою великих файлів (до 2GB)
+    app = (ApplicationBuilder()
+           .token(token)
+           .base_url("https://tgbot.agro-post.com/bot")
+           .base_file_url("https://tgbot.agro-post.com/file/bot")
+           .build())
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
     app.add_handler(CallbackQueryHandler(handle_callback))
