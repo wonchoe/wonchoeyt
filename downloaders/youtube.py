@@ -94,7 +94,19 @@ class YouTubeDownloader(BaseDownloader):
                 with open(cookies_path, 'r') as f:
                     cookie_lines = [line for line in f if line.strip() and not line.startswith('#')]
                     cookie_count = len(cookie_lines)
+                    
+                    # Перевіряємо критичні YouTube cookies
+                    cookie_names = [line.split('\t')[5] if len(line.split('\t')) > 5 else '' for line in cookie_lines]
+                    critical_cookies = ['__Secure-3PSID', '__Secure-1PSID', 'SAPISID', 'SSID']
+                    found_critical = [c for c in critical_cookies if c in cookie_names]
+                    missing_critical = [c for c in critical_cookies if c not in cookie_names]
+                    
                 log.info(f"🍪 YouTube cookies loaded: {cookie_count} cookies ({cookie_size} bytes)")
+                if found_critical:
+                    log.info(f"✅ Critical cookies found: {', '.join(found_critical)}")
+                if missing_critical:
+                    log.warning(f"⚠️  Missing critical cookies: {', '.join(missing_critical)}")
+                    log.warning("   YouTube may block requests without these cookies")
             else:
                 log.warning("⚠️  YouTube cookies NOT FOUND at /tmp/cookies.txt")
                 log.warning("   Bot may encounter 'Sign in to confirm you're not a bot' errors")
@@ -107,10 +119,10 @@ class YouTubeDownloader(BaseDownloader):
                 "progress_hooks": [progress_hook],
                 "restrictfilenames": True,
                 "noplaylist": True,
-                # YouTube specific options to avoid bot detection
+                # YouTube specific options - не використовуємо android з cookies
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["android", "web"],
+                        "player_client": ["web"],
                         "skip": ["dash", "hls"]
                     }
                 },
@@ -126,10 +138,15 @@ class YouTubeDownloader(BaseDownloader):
                 opts["writethumbnail"] = False
                 opts["writesubtitles"] = False
             else:
+                # Більш м'який fallback для відео форматів
                 if video_quality:
-                    opts["format"] = f"bestvideo[height<={video_quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<={video_quality}]"
+                    opts["format"] = (
+                        f"bestvideo[height<={video_quality}]+bestaudio/"
+                        f"best[height<={video_quality}]/"
+                        "best"
+                    )
                 else:
-                    opts["format"] = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
+                    opts["format"] = "bestvideo+bestaudio/best"
                 opts["merge_output_format"] = "mp4"
             
             with yt_dlp.YoutubeDL(opts) as ydl:

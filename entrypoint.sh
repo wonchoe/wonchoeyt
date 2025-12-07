@@ -1,18 +1,29 @@
 #!/bin/bash
 set -e
 
-# Видаляємо старий cookies файл якщо існує (може бути залишок від volume mount)
-if [ -f "/tmp/cookies.txt" ]; then
+# Пріоритет 1: Використовуємо hostPath файл якщо він свіжіший
+HOSTPATH_COOKIES="/app/cookies.txt"
+TMP_COOKIES="/tmp/cookies.txt"
+
+echo "🔍 Checking for cookies sources..."
+
+# Видаляємо старий /tmp/cookies.txt якщо він застарілий
+if [ -f "$TMP_COOKIES" ]; then
     echo "🗑️  Removing old /tmp/cookies.txt..."
-    rm -f /tmp/cookies.txt
+    rm -f "$TMP_COOKIES"
 fi
 
-# Копіюємо read-only cookies в /tmp/ якщо вони існують
-if [ -f "/app/cookies.txt" ]; then
-    echo "📋 Copying and fixing cookies from /app/cookies.txt to /tmp/cookies.txt..."
+# Копіюємо та конвертуємо cookies з /app/cookies.txt (hostPath)
+if [ -f "$HOSTPATH_COOKIES" ]; then
+    echo "📋 Found cookies at $HOSTPATH_COOKIES"
+    COOKIE_SIZE=$(stat -f%z "$HOSTPATH_COOKIES" 2>/dev/null || stat -c%s "$HOSTPATH_COOKIES" 2>/dev/null)
+    echo "📦 Cookie file size: $COOKIE_SIZE bytes"
     
-    # Конвертуємо cookies в правильний Netscape формат
-    python3 - <<'EOF'
+    if [ "$COOKIE_SIZE" -gt 100 ]; then
+        echo "✅ Copying and fixing cookies to $TMP_COOKIES..."
+        
+        # Конвертуємо cookies в правильний Netscape формат
+        python3 - <<'EOF'
 import re
 import sys
 
@@ -60,12 +71,33 @@ def fix_cookies(input_file, output_file):
 
 fix_cookies('/app/cookies.txt', '/tmp/cookies.txt')
 EOF
-    
-    chmod 644 /tmp/cookies.txt
-    echo "✅ Cookies fixed and copied successfully"
+        
+        chmod 644 "$TMP_COOKIES"
+        echo "✅ Cookies fixed and copied successfully"
+    else
+        echo "⚠️  Warning: Cookie file is too small ($COOKIE_SIZE bytes), might be empty"
+    fi
 else
-    echo "⚠️  Warning: /app/cookies.txt not found, bot will work without cookies"
-    echo "   Some platforms may have limitations without authentication"
+    echo "⚠️  Warning: /app/cookies.txt not found"
+    echo "   Bot will work without cookies - some platforms may have limitations"
+    echo "   Create /var/www/ytdl-cookies.txt on host to enable cookie support"
+fi
+
+# Показуємо фінальний стан cookies
+if [ -f "$TMP_COOKIES" ]; then
+    FINAL_SIZE=$(stat -f%z "$TMP_COOKIES" 2>/dev/null || stat -c%s "$TMP_COOKIES" 2>/dev/null)
+    COOKIE_COUNT=$(grep -v '^#' "$TMP_COOKIES" | grep -v '^$' | wc -l)
+    echo "📊 Final cookies status: $COOKIE_COUNT cookies, $FINAL_SIZE bytes"
+else
+    echo "❌ No cookies available - bot will run with limited functionality"
+fi
+
+# Перевірка Node.js для yt-dlp JavaScript challenges
+if command -v node &> /dev/null; then
+    NODE_VERSION=$(node --version)
+    echo "✅ Node.js detected: $NODE_VERSION"
+else
+    echo "⚠️  Warning: Node.js not found - YouTube signature solving may fail"
 fi
 
 # Запускаємо основний процес
