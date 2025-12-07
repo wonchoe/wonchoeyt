@@ -119,13 +119,15 @@ class YouTubeDownloader(BaseDownloader):
                 "progress_hooks": [progress_hook],
                 "restrictfilenames": True,
                 "noplaylist": True,
-                # YouTube specific options - не використовуємо android з cookies
+                # YouTube specific options - використовуємо ios для обходу signature
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["web"],
-                        "skip": ["dash", "hls"]
+                        "player_client": ["ios", "web"],
+                        "skip": ["hls", "dash"],
                     }
                 },
+                # Дозволяємо unplayable formats як запасний варіант
+                "allow_unplayable_formats": True,
             }
             
             if mode == "audio":

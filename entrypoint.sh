@@ -47,15 +47,20 @@ def fix_cookies(input_file, output_file):
         # Розбиваємо по табуляції або множинних пробілах
         parts = re.split(r'\t+|\s{2,}', line)
         
-        if len(parts) >= 7:
+        # Мінімум 6 полів: domain, flag, path, secure, expiration, name
+        # Value опціональний (може бути порожнім)
+        if len(parts) >= 6:
             domain = parts[0]
             flag = parts[1] if parts[1] in ['TRUE', 'FALSE'] else 'TRUE'
             path = parts[2]
             secure = parts[3] if parts[3] in ['TRUE', 'FALSE'] else 'FALSE'
             expiration = parts[4]
             name = parts[5]
-            # Value може містити пробіли, тому беремо все що залишилось
-            value = '\t'.join(parts[6:]) if len(parts) > 7 else parts[6]
+            # Value може бути відсутнім (для тестових cookies)
+            if len(parts) > 6:
+                value = '\t'.join(parts[6:]) if len(parts) > 7 else parts[6]
+            else:
+                value = ''  # Порожнє значення для тестових cookies
             
             # Видаляємо \n з кінця value якщо є
             value = value.rstrip('\n')

@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
+    nano \
     gnupg \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
@@ -14,8 +15,9 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Встановлюємо yt-dlp та залежності
-RUN pip install --no-cache-dir -U yt-dlp
+# 2. Встановлюємо найновішу версію yt-dlp та залежності
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir -U "yt-dlp>=2024.12.06"
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
