@@ -11,7 +11,7 @@ from .base import BaseDownloader
 
 log = logging.getLogger("ytbot")
 
-COOKIES_FILE = "/tmp/ytdl-cookies.txt"
+COOKIES_FILE = "/var/www/ytdl-cookies.txt"
 
 class FacebookDownloader(BaseDownloader):
     """Download videos from Facebook, Instagram stories, and other Meta platforms"""

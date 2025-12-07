@@ -112,7 +112,7 @@ class YouTubeDownloader(BaseDownloader):
                     log.warning(f"⚠️ Failed to load OAuth token: {e}")
             
             # Стратегія: OAuth > cookies > без авторизації
-            cookies_path = "/tmp/ytdl-cookies.txt"
+            cookies_path = "/var/www/ytdl-cookies.txt"
             use_cookies = os.path.exists(cookies_path) and not oauth_token
             
             if oauth_token:

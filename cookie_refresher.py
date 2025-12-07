@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cookie_refresher")
 
-COOKIE_FILE = Path("/tmp/ytdl-cookies.txt")
+COOKIE_FILE = Path("/var/www/ytdl-cookies.txt")
 YOUTUBE_URL = "https://www.youtube.com"
 
 
@@ -25,7 +25,7 @@ async def refresh_cookies():
     async with async_playwright() as p:
         # Запускаємо Chrome з persistent context (зберігає логін між запусками)
         browser = await p.chromium.launch_persistent_context(
-            user_data_dir="/tmp/playwright-profile",
+            user_data_dir="/var/www/playwright-profile",
             headless=True,
             args=[
                 '--disable-blink-features=AutomationControlled',
@@ -132,7 +132,7 @@ async def interactive_login():
     
     async with async_playwright() as p:
         browser = await p.chromium.launch_persistent_context(
-            user_data_dir="/tmp/playwright-profile",
+            user_data_dir="/var/www/playwright-profile",
             headless=False,  # Видимий браузер
             args=[
                 '--disable-blink-features=AutomationControlled',
