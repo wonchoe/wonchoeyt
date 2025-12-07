@@ -2,7 +2,7 @@
 set -e
 
 # Чіткі шляхи для cookies
-HOSTPATH_COOKIES="/app/ytdl-cookies.txt"
+HOSTPATH_COOKIES="/var/www/ytdl-cookies.txt"
 TMP_COOKIES="/tmp/ytdl-cookies.txt"
 
 echo "🔍 Checking for cookies sources..."
@@ -32,7 +32,7 @@ if [ -f "$HOSTPATH_COOKIES" ]; then
         echo "⚠️  Warning: Cookie file is too small ($COOKIE_SIZE bytes), might be empty"
     fi
 else
-    echo "⚠️  Warning: /app/ytdl-cookies.txt not found"
+    echo "⚠️  Warning: /var/www/ytdl-cookies.txt not found"
     echo "   Bot will work without cookies - some platforms may have limitations"
     echo "   Ensure /var/www/ytdl-cookies.txt exists on host and is mounted correctly"
 fi
