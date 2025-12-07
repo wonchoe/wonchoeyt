@@ -68,7 +68,7 @@ class InstagramDownloader(BaseDownloader):
             pass
         
         def sync_download():
-            """Download using yt-dlp (works for most Instagram content)"""
+            """Download using yt-dlp → instaloader → gallery-dl"""
             
             # Try yt-dlp first
             try:
@@ -87,9 +87,16 @@ class InstagramDownloader(BaseDownloader):
                 # If "no video in this post" - try instaloader for photos
                 if ("no video" in error_msg or "no formats" in error_msg) and INSTALOADER_AVAILABLE:
                     log.info("📸 Trying instaloader for photo post...")
-                    return download_with_instaloader()
+                    try:
+                        return download_with_instaloader()
+                    except Exception as insta_err:
+                        log.warning(f"⚠️ Instaloader failed: {insta_err}")
+                        log.info("🎨 Trying gallery-dl as last resort...")
+                        return download_with_gallery_dl()
                 else:
-                    raise
+                    # Try gallery-dl as last resort
+                    log.info("🎨 Trying gallery-dl as fallback...")
+                    return download_with_gallery_dl()
         
         def download_with_ytdlp():
             """Download using yt-dlp"""
@@ -263,6 +270,51 @@ class InstagramDownloader(BaseDownloader):
             except Exception as e:
                 log.error(f"Instaloader error: {e}")
                 raise
+        
+        def download_with_gallery_dl():
+            """Download using gallery-dl"""
+            import subprocess
+            import json
+            
+            log.info("🎨 Using gallery-dl...")
+            
+            # Prepare command
+            cmd = [
+                "gallery-dl",
+                "--quiet",
+                "--no-check-certificate",
+                "-D", str(download_dir),
+            ]
+            
+            # Add cookies if available
+            cookies_file = Path("/tmp/ytdl-cookies.txt")
+            if cookies_file.exists():
+                cmd.extend(["--cookies", str(cookies_file)])
+            
+            cmd.append(url)
+            
+            # Run gallery-dl
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode != 0:
+                raise Exception(f"gallery-dl failed: {result.stderr}")
+            
+            # Find downloaded files
+            files = []
+            for ext in ['jpg', 'jpeg', 'png', 'mp4', 'webm']:
+                files.extend(download_dir.glob(f"*.{ext}"))
+            
+            if not files:
+                raise Exception("No files downloaded by gallery-dl")
+            
+            # Sort by modification time (newest first)
+            files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            
+            # Determine media type
+            media_type = "video" if any(f.suffix.lower() in ['.mp4', '.webm'] for f in files) else "photo"
+            
+            log.info(f"✅ gallery-dl downloaded {len(files)} file(s)")
+            return files, media_type
         
         loop = asyncio.get_running_loop()
         files, media_type = await loop.run_in_executor(POOL, sync_download)
