@@ -81,6 +81,17 @@ def get_downloader(url: str):
 
 
 # ---------------------------------------------------------
+# HELPER FUNCTIONS
+# ---------------------------------------------------------
+async def safe_edit_message(message, text: str):
+    """Safely edit message, ignoring timeout errors"""
+    try:
+        await message.edit_text(text)
+    except Exception as e:
+        log.debug(f"Failed to edit message: {e}")
+
+
+# ---------------------------------------------------------
 # PROGRESS BAR
 # ---------------------------------------------------------
 def make_bar(percent: float):
@@ -313,7 +324,7 @@ async def download_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             
             # Якщо файл більше 50MB - завантажуємо на gofile.io
             if file_size > 50 * 1024 * 1024:
-                await status_msg.edit_text(f"📤 Файл завеликий ({file_size / 1024 / 1024:.1f} MB), завантажую на gofile.io...")
+                await safe_edit_message(status_msg, f"📤 Файл завеликий ({file_size / 1024 / 1024:.1f} MB), завантажую на gofile.io...")
                 link = await upload_to_gofile(fp)
                 await context.bot.send_message(
                     chat_id,
@@ -321,11 +332,14 @@ async def download_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                     f"🔗 Завантажено на gofile.io:\n{link}"
                 )
             else:
+                await safe_edit_message(status_msg, f"📤 Надсилаю відео ({file_size / 1024 / 1024:.1f} MB)...")
                 with fp.open("rb") as f:
                     await context.bot.send_video(
                         chat_id,
                         video=InputFile(f, filename=fp.name),
-                        supports_streaming=True
+                        supports_streaming=True,
+                        read_timeout=120,
+                        write_timeout=120
                     )
             
             # Видаляємо статус
@@ -400,7 +414,7 @@ async def download_tiktok(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
             
             # Якщо файл більше 50MB - завантажуємо на gofile.io
             if file_size > 50 * 1024 * 1024:
-                await status_msg.edit_text(f"📤 Файл завеликий ({file_size / 1024 / 1024:.1f} MB), завантажую на gofile.io...")
+                await safe_edit_message(status_msg, f"📤 Файл завеликий ({file_size / 1024 / 1024:.1f} MB), завантажую на gofile.io...")
                 link = await upload_to_gofile(fp)
                 await context.bot.send_message(
                     chat_id,
@@ -408,11 +422,14 @@ async def download_tiktok(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
                     f"🔗 Завантажено на gofile.io:\n{link}"
                 )
             else:
+                await safe_edit_message(status_msg, f"📤 Надсилаю відео ({file_size / 1024 / 1024:.1f} MB)...")
                 with fp.open("rb") as f:
                     await context.bot.send_video(
                         chat_id,
                         video=InputFile(f, filename=fp.name),
-                        supports_streaming=True
+                        supports_streaming=True,
+                        read_timeout=120,
+                        write_timeout=120
                     )
             
             # Видаляємо статус
@@ -432,7 +449,7 @@ async def download_tiktok(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
     
     except Exception as e:
         log.error(f"TikTok download error: {e}", exc_info=True)
-        await status_msg.edit_text(f"❌ Помилка: {str(e)[:150]}")
+        await safe_edit_message(status_msg, f"❌ Помилка: {str(e)[:150]}")
 
 
 # ---------------------------------------------------------

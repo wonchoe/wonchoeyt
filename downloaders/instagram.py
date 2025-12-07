@@ -181,7 +181,7 @@ class InstagramDownloader(BaseDownloader):
             
             shortcode = match.group(1)
             
-            # Setup instaloader
+            # Setup instaloader with cookies support
             L = instaloader.Instaloader(
                 download_videos=False,
                 download_video_thumbnails=False,
@@ -192,6 +192,26 @@ class InstagramDownloader(BaseDownloader):
                 dirname_pattern=str(download_dir),
                 filename_pattern="{shortcode}_{mediacount}"
             )
+            
+            # Try to load cookies if available
+            cookies_file = Path("/tmp/cookies.txt")
+            if cookies_file.exists():
+                try:
+                    # Load cookies from Netscape format
+                    import http.cookiejar
+                    cj = http.cookiejar.MozillaCookieJar(str(cookies_file))
+                    cj.load(ignore_discard=True, ignore_expires=True)
+                    
+                    # Extract Instagram cookies
+                    for cookie in cj:
+                        if 'instagram.com' in cookie.domain:
+                            L.context._session.cookies.set_cookie(cookie)
+                    
+                    log.info("🍪 Loaded Instagram cookies")
+                except Exception as e:
+                    log.warning(f"Failed to load cookies: {e}")
+            else:
+                log.warning("⚠️ No cookies file found, Instagram photo downloads may fail")
             
             try:
                 # Download post

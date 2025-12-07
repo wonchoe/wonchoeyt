@@ -21,7 +21,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# 3. Перевірка версій
+# 3. Копіюємо entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# 4. Перевірка версій
 RUN node -v && npm -v && yt-dlp --version
 
-CMD ["python", "app.py"]
+ENTRYPOINT ["/entrypoint.sh"]

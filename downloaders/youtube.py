@@ -1,5 +1,6 @@
 """YouTube downloader using yt-dlp"""
 
+import os
 import re
 import time
 import asyncio
@@ -86,14 +87,33 @@ class YouTubeDownloader(BaseDownloader):
                 )
         
         def sync_download():
+            # Перевірка cookies файлу
+            cookies_path = "/tmp/cookies.txt"
+            if os.path.exists(cookies_path):
+                cookie_size = os.path.getsize(cookies_path)
+                with open(cookies_path, 'r') as f:
+                    cookie_lines = [line for line in f if line.strip() and not line.startswith('#')]
+                    cookie_count = len(cookie_lines)
+                log.info(f"🍪 YouTube cookies loaded: {cookie_count} cookies ({cookie_size} bytes)")
+            else:
+                log.warning("⚠️  YouTube cookies NOT FOUND at /tmp/cookies.txt")
+                log.warning("   Bot may encounter 'Sign in to confirm you're not a bot' errors")
+            
             opts = {
-                "cookiefile": "/tmp/cookies.txt",
+                "cookiefile": cookies_path,
                 "outtmpl": str(download_dir / "%(title)s.%(ext)s"),
                 "quiet": True,
                 "nocheckcertificate": True,
                 "progress_hooks": [progress_hook],
                 "restrictfilenames": True,
                 "noplaylist": True,
+                # YouTube specific options to avoid bot detection
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android", "web"],
+                        "skip": ["dash", "hls"]
+                    }
+                },
             }
             
             if mode == "audio":
