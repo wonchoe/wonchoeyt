@@ -23,3 +23,18 @@
 .youtube.com	TRUE	/	TRUE	1779919691	__Secure-YNID	13.YT=N_J3djcbygFzow7nLOo7QeyI9cVeYH8ymCSaS9V4MbQKWCJ3DfbR-4Tlm4LgHXV6Os9FYtryZoYv-3pMCyjqEVnZq3fLjyV-jVz18XALReeCHz9nFFGWsZgsj7LCffLNqRLjfJfYVfQJ8D51Lh7tWe0mcncCbg_56OE15_cbtKhHmRTri6W6Fb2j6_-hbPwZyjLxzoYPr6VrCeENao6nKSRicyRFxyGTk-BD_gKkat3uWp_zuLf94-oFSknv_6qFCvRiNx7fmPmXbvQ1AKg403F6De2hNAfLe0IYx_-iOMJ_pXnIN-D_fvUTZtHAcr97hXTr69YmV7XGLGIXJVFdjw
 .youtube.com	TRUE	/	TRUE	0	YSC	FE4sOj1-hM8
 .youtube.com	TRUE	/	TRUE	1779919691	__Secure-ROLLOUT_TOKEN	CN7Ki_7gz52CaxCQ7u3V-62KAxiAjsHr7ZWRAw%3D%3D
+
+# Netscape HTTP Cookie File
+# https://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file! Do not edit.
+
+.facebook.com	TRUE	/	TRUE	1799683158	datr	Hb1NaPLRak2MLwySHqSnpAsw
+.facebook.com	TRUE	/	TRUE	1799274219	sb	Hb1NaDO74g-LT9YyY1yV7NGm
+.facebook.com	TRUE	/	TRUE	1785772517	ps_l	1
+.facebook.com	TRUE	/	TRUE	1785772517	ps_n	1
+.facebook.com	TRUE	/	TRUE	1765729140	wd	2048x991
+.facebook.com	TRUE	/	TRUE	1765729140	dpr	1.25
+.facebook.com	TRUE	/	TRUE	1796659158	c_user	100041396225174
+.facebook.com	TRUE	/	TRUE	1796659158	xs	21%3AFz2P3AtUwlsgVQ%3A2%3A1764714217%3A-1%3A-1%3A%3AAcwCRwA7ley4N_xzj3hLMRyCN1zYpl9IxwahM2HY7A
+.facebook.com	TRUE	/	TRUE	1772900337	fr	1Oe9LQW7oHIz6yLY8.AWeJc6Eh-V_5yIBs3s5syWFDEuH3W0orac-UavPDdN825KkinZ8.BpNaRU..AAA.0.0.BpNajw.AWcCvyODGHK3yQ_4hN6T3BBycUQ
+.facebook.com	TRUE	/	TRUE	0	presence	C%7B%22t3%22%3A%5B%5D%2C%22utc3%22%3A1765124340616%2C%22v%22%3A1%7D
