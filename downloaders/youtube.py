@@ -212,20 +212,14 @@ class YouTubeDownloader(BaseDownloader):
                 log.warning("⚠️ No cookies - YouTube downloads may fail!")
 
             
-            # Базова конфігурація
+            # Базова конфігурація (як в CLI, мінімум обмежень)
             opts = {
                 "outtmpl": str(download_dir / "%(title)s.%(ext)s"),
                 "quiet": False,
-                "verbose": True,  # Детальне логування для debug
                 "nocheckcertificate": True,
                 "progress_hooks": [progress_hook],
                 "restrictfilenames": True,
                 "noplaylist": True,
-                "http_headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                },
             }
             
             # Node.js вже в PATH, yt-dlp автоматично знайде його
@@ -269,12 +263,12 @@ class YouTubeDownloader(BaseDownloader):
             # Різні стратегії обходу YouTube блокування
             strategies = []
             
-            # ПРІОРИТЕТ 1: Просто cookies без player_client обмежень
+            # ПРІОРИТЕТ 1: Просто cookies БЕЗ extractor_args (як в CLI!)
             if use_cookies:
                 opts_simple = opts.copy()
                 opts_simple["cookiefile"] = cookies_path
-                # Не обмежуємо player_client - нехай yt-dlp вибере сам
-                strategies.append(("with cookies (auto client)", opts_simple))
+                # НЕ додаємо extractor_args - нехай yt-dlp сам вибере клієнт
+                strategies.append(("with cookies (default)", opts_simple))
             else:
                 raise Exception("YouTube downloads require cookies. Please provide valid cookies file.")
             
