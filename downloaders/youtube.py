@@ -1,5 +1,6 @@
 """YouTube downloader using yt-dlp"""
 
+import asyncio
 import os
 import re
 import time
