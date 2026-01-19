@@ -134,6 +134,12 @@ class YouTubeDownloader(BaseDownloader):
                 "restrictfilenames": True,
                 "noplaylist": True,
             }
+
+            # Налаштування JS runtime для YouTube challenges (EJS)
+            if node_path:
+                opts["js_runtimes"] = {"node": {"path": node_path}}
+            else:
+                log.warning("⚠️ No JS runtime configured for yt-dlp")
             
             # Node.js вже в PATH, yt-dlp автоматично знайде його
             if node_path:
@@ -144,7 +150,7 @@ class YouTubeDownloader(BaseDownloader):
             
             if mode == "audio":
                 # Максимально м'який fallback для audio
-                opts["format"] = "bestaudio/bestaudio*/best/best*"
+                opts["format"] = "bestaudio[protocol=https]/bestaudio*/best[protocol=https]/best"
                 opts["postprocessors"] = [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
@@ -156,17 +162,17 @@ class YouTubeDownloader(BaseDownloader):
                 # Максимально агресивний fallback для відео
                 if video_quality:
                     opts["format"] = (
-                        f"bestvideo*[height<={video_quality}]+bestaudio*/"
-                        f"bestvideo[height<={video_quality}]+bestaudio/"
-                        f"best*[height<={video_quality}]/"
-                        f"best[height<={video_quality}]/"
-                        "best*/best"
+                        f"bestvideo*[height<={video_quality}][protocol=https]+bestaudio[protocol=https]/"
+                        f"bestvideo[height<={video_quality}][protocol=https]+bestaudio[protocol=https]/"
+                        f"best*[height<={video_quality}][protocol=https]/"
+                        f"best[height<={video_quality}][protocol=https]/"
+                        "best*[protocol=https]/best[protocol=https]"
                     )
                 else:
                     opts["format"] = (
-                        "bestvideo*+bestaudio*/"
-                        "bestvideo+bestaudio/"
-                        "best*/best"
+                        "bestvideo*[protocol=https]+bestaudio[protocol=https]/"
+                        "bestvideo[protocol=https]+bestaudio[protocol=https]/"
+                        "best*[protocol=https]/best[protocol=https]"
                     )
                 opts["merge_output_format"] = "mp4"
             
@@ -183,7 +189,8 @@ class YouTubeDownloader(BaseDownloader):
                 # НЕ додаємо extractor_args - нехай yt-dlp сам вибере клієнт
                 strategies.append(("with cookies (default)", opts_simple))
             else:
-                raise Exception("YouTube downloads require cookies. Please provide valid cookies file.")
+                log.warning("⚠️ Proceeding without cookies; some formats may be unavailable")
+                strategies.append(("without cookies", opts.copy()))
             
             for strategy_name, strategy_opts in strategies:
                 try:
