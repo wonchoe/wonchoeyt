@@ -30,9 +30,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Встановлюємо Python packages
-RUN pip install --no-cache-dir -U pip && \
-    pip install --no-cache-dir -U "yt-dlp>=2024.12.06" && \
-    pip install --no-cache-dir websockets brotli pycryptodomex gallery-dl
+RUN pip install --no-cache-dir -U pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
