@@ -181,6 +181,13 @@ class YouTubeDownloader(BaseDownloader):
             
             # Різні стратегії обходу YouTube блокування
             strategies = []
+
+            def with_player_client(base_opts, client: str):
+                opts_client = base_opts.copy()
+                extractor_args = dict(opts_client.get("extractor_args", {}))
+                extractor_args["youtube"] = {"player_client": [client]}
+                opts_client["extractor_args"] = extractor_args
+                return opts_client
             
             # ПРІОРИТЕТ 1: Просто cookies БЕЗ extractor_args (як в CLI!)
             if use_cookies:
@@ -188,9 +195,21 @@ class YouTubeDownloader(BaseDownloader):
                 opts_simple["cookiefile"] = cookies_path
                 # НЕ додаємо extractor_args - нехай yt-dlp сам вибере клієнт
                 strategies.append(("with cookies (default)", opts_simple))
+
+                # Fallback: force android client (helps with 403)
+                strategies.append((
+                    "with cookies (android client)",
+                    with_player_client(opts_simple, "android"),
+                ))
             else:
                 log.warning("⚠️ Proceeding without cookies; some formats may be unavailable")
                 strategies.append(("without cookies", opts.copy()))
+
+                # Fallback: force android client (helps with 403)
+                strategies.append((
+                    "without cookies (android client)",
+                    with_player_client(opts.copy(), "android"),
+                ))
             
             for strategy_name, strategy_opts in strategies:
                 try:

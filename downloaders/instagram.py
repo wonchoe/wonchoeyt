@@ -70,9 +70,9 @@ class InstagramDownloader(BaseDownloader):
         def sync_download():
             """Download using yt-dlp → instaloader → gallery-dl"""
             
-            # Try yt-dlp first
+            # Prefer no-cookies attempt first (requested)
             try:
-                files, media_type = download_with_ytdlp()
+                files, media_type = download_with_ytdlp(use_cookies=False)
                 
                 # If yt-dlp returned 0 files, try instaloader
                 if not files and INSTALOADER_AVAILABLE:
@@ -81,6 +81,14 @@ class InstagramDownloader(BaseDownloader):
                 
                 return files, media_type
                 
+            except Exception as e:
+                log.warning(f"⚠️ yt-dlp (no cookies) failed: {e}")
+            
+            # Fallback: try yt-dlp with cookies if available
+            try:
+                files, media_type = download_with_ytdlp(use_cookies=True)
+                if files:
+                    return files, media_type
             except Exception as e:
                 error_msg = str(e).lower()
                 
@@ -92,17 +100,16 @@ class InstagramDownloader(BaseDownloader):
                     except Exception as insta_err:
                         log.warning(f"⚠️ Instaloader failed: {insta_err}")
                         log.info("🎨 Trying gallery-dl as last resort...")
-                        return download_with_gallery_dl()
+                        return download_with_gallery_dl(use_cookies=False)
                 else:
                     # Try gallery-dl as last resort
                     log.info("🎨 Trying gallery-dl as fallback...")
-                    return download_with_gallery_dl()
+                    return download_with_gallery_dl(use_cookies=False)
         
-        def download_with_ytdlp():
+        def download_with_ytdlp(use_cookies: bool):
             """Download using yt-dlp"""
-            log.info("🔄 Trying yt-dlp...")
+            log.info(f"🔄 Trying yt-dlp ({'with' if use_cookies else 'no'} cookies)...")
             opts = {
-                "cookiefile": "/var/www/ytdl-cookies.txt",
                 "outtmpl": str(download_dir / "%(title)s_%(autonumber)s.%(ext)s"),
                 "quiet": False,  # Show more info
                 "no_warnings": False,
@@ -112,7 +119,22 @@ class InstagramDownloader(BaseDownloader):
                 "noplaylist": False,
                 # Get best quality for photos
                 "format": "best",
+                "retries": 3,
+                "fragment_retries": 3,
+                "http_headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-us,en;q=0.5",
+                    "Referer": "https://www.instagram.com/",
+                },
             }
+
+            if use_cookies:
+                cookies_path = Path("/var/www/ytdl-cookies.txt")
+                if cookies_path.exists():
+                    opts["cookiefile"] = str(cookies_path)
+                else:
+                    log.warning("⚠️ Cookies file not found, continuing without cookies")
             
             files = []
             media_type = "video"
@@ -271,7 +293,7 @@ class InstagramDownloader(BaseDownloader):
                 log.error(f"Instaloader error: {e}")
                 raise
         
-        def download_with_gallery_dl():
+        def download_with_gallery_dl(use_cookies: bool = False):
             """Download using gallery-dl"""
             import subprocess
             import json
@@ -286,10 +308,11 @@ class InstagramDownloader(BaseDownloader):
                 "-D", str(download_dir),
             ]
             
-            # Add cookies if available
-            cookies_file = Path("/var/www/ytdl-cookies.txt")
-            if cookies_file.exists():
-                cmd.extend(["--cookies", str(cookies_file)])
+            # Add cookies if requested and available
+            if use_cookies:
+                cookies_file = Path("/var/www/ytdl-cookies.txt")
+                if cookies_file.exists():
+                    cmd.extend(["--cookies", str(cookies_file)])
             
             cmd.append(url)
             
