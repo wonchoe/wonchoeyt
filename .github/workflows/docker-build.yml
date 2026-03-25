@@ -38,7 +38,7 @@ jobs:
       - name: Decide whether a rebuild is needed
         id: detect
         env:
-          FORCE_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_build || 'false' }}
+          FORCE_BUILD: ${{ github.event.inputs.force_build || 'false' }}
         shell: bash
         run: |
           set -euo pipefail
