@@ -7,12 +7,6 @@ on:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
-    inputs:
-      force_build:
-        description: Force rebuild even if yt-dlp is already current
-        required: false
-        default: false
-        type: boolean
 
 env:
   IMAGE_NAME: wonchoe/ytdl-bot
@@ -37,8 +31,6 @@ jobs:
 
       - name: Decide whether a rebuild is needed
         id: detect
-        env:
-          FORCE_BUILD: ${{ github.event.inputs.force_build || 'false' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -85,7 +77,7 @@ PY
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             build_required=true
             reason="source-changed"
-          elif [[ "${FORCE_BUILD}" == "true" ]]; then
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             build_required=true
             reason="manual-force"
           elif [[ -z "$current_version" || -z "$current_digest" ]]; then
@@ -170,14 +162,6 @@ PY
             echo "### Target yt-dlp"
             echo "- Version in target image: $target_version"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Ensure GitOps token is configured
-        shell: bash
-        run: |
-          if [[ -z "${{ secrets.K3S_CURSOR_STYLE_REPO_TOKEN }}" ]]; then
-            echo "Missing required secret: K3S_CURSOR_STYLE_REPO_TOKEN" >&2
-            exit 1
-          fi
 
       - name: Checkout GitOps repository
         uses: actions/checkout@v4
