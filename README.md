@@ -60,22 +60,33 @@ kubectl logs -n wonchoeyoutubebot deployment/ytdl-bot --tail=50
 
 ### Automated Daily Updates
 
-`wonchoeyt` now supports a fully automatic GitHub Actions flow:
+The production host runs a local `systemd` timer for this repository:
 
-- every day it checks the latest stable `yt-dlp` release on PyPI
-- it rebuilds and pushes a new ARM64 image only when `yt-dlp` changed
-- after build, it updates the pinned digest in `wonchoe/k3s-cursor.style`
-- ArgoCD then auto-syncs the new digest into the cluster
+- it pulls `/home/ubuntu/wonchoeyt`
+- checks the latest stable `yt-dlp` release on PyPI
+- rebuilds and pushes a new ARM64 image only when source or `yt-dlp` changed
+- updates the pinned digest in `wonchoe/k3s-cursor.style`
+- triggers ArgoCD sync and verifies rollout
+- cleans old local `wonchoe/ytdl-bot` images and stale build cache
 
-The same workflow also runs on every push to `main`, so code changes deploy through the same pipeline.
+Files for this flow:
 
-Required GitHub secret in `wonchoe/wonchoeyt`:
+- `scripts/ytdl-bot-auto-update.sh`
+- `ops/systemd/ytdl-bot-auto-update.service`
+- `ops/systemd/ytdl-bot-auto-update.timer`
 
-- `K3S_CURSOR_STYLE_REPO_TOKEN`: a PAT with write access to `wonchoe/k3s-cursor.style`
+Install on production:
 
-Workflow file:
+```bash
+cd /home/ubuntu/wonchoeyt
+sudo install -m 0644 ops/systemd/ytdl-bot-auto-update.service /etc/systemd/system/ytdl-bot-auto-update.service
+sudo install -m 0644 ops/systemd/ytdl-bot-auto-update.timer /etc/systemd/system/ytdl-bot-auto-update.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now ytdl-bot-auto-update.timer
+sudo systemctl start ytdl-bot-auto-update.service
+```
 
-- `.github/workflows/docker-build.yml`
+The GitHub Actions workflow can stay as a fallback/manual path, but the normal production update path is now local to this project.
 
 ### Docker Compose (Local)
 

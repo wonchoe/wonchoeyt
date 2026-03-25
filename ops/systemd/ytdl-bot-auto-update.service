@@ -1,0 +1,14 @@
+[Unit]
+Description=Auto-update ytdl-bot image and GitOps deployment
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/wonchoeyt
+ExecStart=/usr/bin/env bash /home/ubuntu/wonchoeyt/scripts/ytdl-bot-auto-update.sh
+
+[Install]
+WantedBy=multi-user.target
