@@ -58,6 +58,25 @@ kubectl get pods -n wonchoeyoutubebot
 kubectl logs -n wonchoeyoutubebot deployment/ytdl-bot --tail=50
 ```
 
+### Automated Daily Updates
+
+`wonchoeyt` now supports a fully automatic GitHub Actions flow:
+
+- every day it checks the latest stable `yt-dlp` release on PyPI
+- it rebuilds and pushes a new ARM64 image only when `yt-dlp` changed
+- after build, it updates the pinned digest in `wonchoe/k3s-cursor.style`
+- ArgoCD then auto-syncs the new digest into the cluster
+
+The same workflow also runs on every push to `main`, so code changes deploy through the same pipeline.
+
+Required GitHub secret in `wonchoe/wonchoeyt`:
+
+- `K3S_CURSOR_STYLE_REPO_TOKEN`: a PAT with write access to `wonchoe/k3s-cursor.style`
+
+Workflow file:
+
+- `.github/workflows/docker-build.yml`
+
 ### Docker Compose (Local)
 
 ```bash

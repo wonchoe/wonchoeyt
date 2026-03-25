@@ -1,34 +1,125 @@
-name: Build and Push Docker Image
+name: Build, Publish and Sync GitOps
 
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: "0 3 */3 * *"
+    - cron: "0 3 * * *"
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: Force rebuild even if yt-dlp is already current
+        required: false
+        default: false
+        type: boolean
 
 env:
   IMAGE_NAME: wonchoe/ytdl-bot
+  GITOPS_REPOSITORY: wonchoe/k3s-cursor.style
+
+concurrency:
+  group: wonchoeyt-build-and-sync
+  cancel-in-progress: false
 
 jobs:
-  build:
+  build-and-sync:
     runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Decide whether a rebuild is needed
+        id: detect
+        env:
+          FORCE_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_build || 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_version="$(python - <<'PY'
+import json
+import urllib.request
+
+with urllib.request.urlopen('https://pypi.org/pypi/yt-dlp/json', timeout=30) as response:
+    payload = json.load(response)
+
+print(payload['info']['version'])
+PY
+          )"
+
+          current_version=""
+          current_digest=""
+
+          if docker pull "${IMAGE_NAME}:latest" >/dev/null 2>&1; then
+            current_version="$(docker run --rm --entrypoint yt-dlp "${IMAGE_NAME}:latest" --version 2>/dev/null || true)"
+            current_digest="$(docker buildx imagetools inspect "${IMAGE_NAME}:latest" | awk '/Digest:/ {print $2; exit}' || true)"
+          fi
+
+          normalize_version() {
+            python - "$1" <<'PY'
+import re
+import sys
+
+parts = [segment for segment in re.split(r'[^0-9]+', sys.argv[1]) if segment]
+print('.'.join(str(int(segment)) for segment in parts))
+PY
+          }
+
+          normalized_latest="$(normalize_version "$latest_version")"
+          normalized_current=""
+
+          if [[ -n "$current_version" ]]; then
+            normalized_current="$(normalize_version "$current_version")"
+          fi
+
+          build_required=false
+          reason="up-to-date"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            build_required=true
+            reason="source-changed"
+          elif [[ "${FORCE_BUILD}" == "true" ]]; then
+            build_required=true
+            reason="manual-force"
+          elif [[ -z "$current_version" || -z "$current_digest" ]]; then
+            build_required=true
+            reason="missing-latest-image"
+          elif [[ "$normalized_latest" != "$normalized_current" ]]; then
+            build_required=true
+            reason="yt-dlp-updated"
+          fi
+
+          echo "latest_version=$latest_version" >> "$GITHUB_OUTPUT"
+          echo "current_version=$current_version" >> "$GITHUB_OUTPUT"
+          echo "current_digest=$current_digest" >> "$GITHUB_OUTPUT"
+          echo "build_required=$build_required" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Build Decision"
+            echo "- Latest PyPI yt-dlp: $latest_version"
+            echo "- Current image yt-dlp: ${current_version:-missing}"
+            echo "- Build required: $build_required"
+            echo "- Reason: $reason"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Login to Docker Hub
+        if: steps.detect.outputs.build_required == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Build and push ARM64 image
+        if: steps.detect.outputs.build_required == 'true'
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -36,4 +127,92 @@ jobs:
           platforms: linux/arm64
           tags: |
             ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.run_number }}
+            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+
+      - name: Resolve target digest
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ steps.detect.outputs.build_required }}" == "true" ]]; then
+            digest="${{ steps.build.outputs.digest }}"
+          else
+            digest="${{ steps.detect.outputs.current_digest }}"
+          fi
+
+          if [[ -z "$digest" ]]; then
+            echo "Unable to resolve target digest" >&2
+            exit 1
+          fi
+
+          image_ref="${IMAGE_NAME}@${digest}"
+
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "image_ref=$image_ref" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Target Image"
+            echo "- Image: $image_ref"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify target image version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker pull "${{ steps.target.outputs.image_ref }}" >/dev/null
+          target_version="$(docker run --rm --entrypoint yt-dlp "${{ steps.target.outputs.image_ref }}" --version)"
+
+          echo "target_version=$target_version" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Target yt-dlp"
+            echo "- Version in target image: $target_version"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ensure GitOps token is configured
+        shell: bash
+        run: |
+          if [[ -z "${{ secrets.K3S_CURSOR_STYLE_REPO_TOKEN }}" ]]; then
+            echo "Missing required secret: K3S_CURSOR_STYLE_REPO_TOKEN" >&2
+            exit 1
+          fi
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPOSITORY }}
+          token: ${{ secrets.K3S_CURSOR_STYLE_REPO_TOKEN }}
+          path: gitops
+
+      - name: Update GitOps image digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/scripts/update-gitops-digest.sh" "$GITHUB_WORKSPACE/gitops" "${{ steps.target.outputs.image_ref }}"
+
+      - name: Commit and push GitOps update
+        working-directory: gitops
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- ytld/base/dep.yaml ytld/base/cookie-refresher-cronjob.yaml; then
+            echo "GitOps already points to the target digest"
+            echo "### GitOps" >> "$GITHUB_STEP_SUMMARY"
+            echo "- No digest change was required" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ytld/base/dep.yaml ytld/base/cookie-refresher-cronjob.yaml
+          git commit -m "deploy: update ytdl-bot digest to ${{ steps.target.outputs.digest }}"
+          git push origin HEAD:main
+
+          {
+            echo "### GitOps"
+            echo "- Updated k3s-cursor.style to ${{ steps.target.outputs.image_ref }}"
+            echo "- ArgoCD will auto-sync from the new Git revision"
+          } >> "$GITHUB_STEP_SUMMARY"
