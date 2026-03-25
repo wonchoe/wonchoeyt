@@ -35,16 +35,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          latest_version="$(python - <<'PY'
-          import json
-          import urllib.request
-
-          with urllib.request.urlopen('https://pypi.org/pypi/yt-dlp/json', timeout=30) as response:
-              payload = json.load(response)
-
-          print(payload['info']['version'])
-          PY
-          )"
+          latest_version="$(python -c "import json, urllib.request; print(json.load(urllib.request.urlopen('https://pypi.org/pypi/yt-dlp/json', timeout=30))['info']['version'])")"
 
           current_version=""
           current_digest=""
@@ -55,13 +46,7 @@ jobs:
           fi
 
           normalize_version() {
-            python - "$1" <<'PY'
-            import re
-            import sys
-
-            parts = [segment for segment in re.split(r'[^0-9]+', sys.argv[1]) if segment]
-            print('.'.join(str(int(segment)) for segment in parts))
-            PY
+            python -c "import re, sys; parts = [segment for segment in re.split(r'[^0-9]+', sys.argv[1]) if segment]; print('.'.join(str(int(segment)) for segment in parts))" "$1"
           }
 
           normalized_latest="$(normalize_version "$latest_version")"
