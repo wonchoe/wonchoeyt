@@ -30,7 +30,7 @@ file_path = pathlib.Path(sys.argv[1])
 image_ref = sys.argv[2]
 
 content = file_path.read_text()
-updated = re.sub(r'docker\.io/wonchoe/ytdl-bot@sha256:[a-f0-9]+', image_ref, content)
+  updated = re.sub(r'(?:docker\.io/)?wonchoe/ytdl-bot@sha256:[a-f0-9]+', image_ref, content)
 file_path.write_text(updated)
 PY
 
