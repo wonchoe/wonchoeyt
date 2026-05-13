@@ -136,7 +136,8 @@ kubectl logs -n wonchoeyoutubebot -l job-name=cookie-refresher --tail=50
 ## Environment Variables
 
 - `TELEGRAM_BOT_TOKEN` - Telegram Bot API token (required)
-- Custom Telegram Bot API: `https://tgbot.agro-post.com` (2GB file support)
+- `TELEGRAM_API_BASE_URL` - Custom Telegram Bot API base URL (defaults to `http://telegram-bot-api:8081/bot`)
+- `TELEGRAM_API_FILE_URL` - Custom Telegram Bot API file URL (defaults to `http://telegram-bot-api:8081/file/bot`)
 
 ## License
 

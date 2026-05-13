@@ -645,11 +645,15 @@ def main():
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
     
-    # Custom Telegram Bot API server з підтримкою великих файлів (до 2GB)
+    # Custom Telegram Bot API server з підтримкою великих файлів (до 2GB).
+    # In Kubernetes this should stay internal so the origin IP is not exposed.
+    telegram_api_base_url = os.getenv("TELEGRAM_API_BASE_URL", "http://telegram-bot-api:8081/bot")
+    telegram_api_file_url = os.getenv("TELEGRAM_API_FILE_URL", "http://telegram-bot-api:8081/file/bot")
+
     app = (ApplicationBuilder()
            .token(token)
-           .base_url("https://tgbot.agro-post.com/bot")
-           .base_file_url("https://tgbot.agro-post.com/file/bot")
+           .base_url(telegram_api_base_url)
+           .base_file_url(telegram_api_file_url)
            .build())
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
