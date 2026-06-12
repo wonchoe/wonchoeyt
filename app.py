@@ -454,7 +454,15 @@ async def download_tiktok(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
     
     except Exception as e:
         log.error(f"TikTok download error: {e}", exc_info=True)
-        await safe_edit_message(status_msg, f"❌ Помилка: {str(e)[:150]}")
+        error_msg = str(e)
+        if 'Log in for access' in error_msg or 'not be comfortable for some audiences' in error_msg:
+            await safe_edit_message(
+                status_msg,
+                "❌ TikTok просить вхід для цього відео.\n\n"
+                "Цей пост позначений як чутливий/обмежений, тому потрібні TikTok cookies від залогіненого акаунта."
+            )
+        else:
+            await safe_edit_message(status_msg, f"❌ Помилка: {error_msg[:150]}")
 
 
 # ---------------------------------------------------------
