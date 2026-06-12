@@ -17,14 +17,15 @@ COOKIE_FILE = Path("/var/www/ytdl-cookies.txt")
 SITES = [
     "https://www.youtube.com",
     "https://www.facebook.com", 
-    "https://www.instagram.com"
+    "https://www.instagram.com",
+    "https://www.tiktok.com"
 ]
 
 
 async def refresh_cookies(save_html=False):
     """Оновити cookies з браузера де користувач залогінений"""
     
-    log.info("🔄 Starting cookie refresh for YouTube, Facebook, Instagram...")
+    log.info("🔄 Starting cookie refresh for YouTube, Facebook, Instagram, TikTok...")
     
     async with async_playwright() as p:
         # Запускаємо Chrome з persistent context (зберігає логін між запусками)
@@ -78,13 +79,15 @@ async def refresh_cookies(save_html=False):
             # Отримуємо всі cookies (вже маємо з перевірки вище)
             all_cookies = await browser.cookies()
             
-            # Фільтруємо cookies для YouTube, Facebook, Instagram, Google
+            # Фільтруємо cookies для YouTube, Facebook, Instagram, TikTok, Google
             relevant_cookies = [
                 c for c in all_cookies
                 if any(domain in c.get('domain', '') for domain in [
                     'youtube.com', 'google.com', 
                     'facebook.com', 'fb.com',
-                    'instagram.com', 'cdninstagram.com'
+                    'instagram.com', 'cdninstagram.com',
+                    'tiktok.com', 'tiktokv.com', 'tiktokcdn.com',
+                    'byteoversea.com', 'ibytedtos.com'
                 ])
             ]
             
@@ -131,10 +134,12 @@ async def refresh_cookies(save_html=False):
             youtube_count = len([c for c in relevant_cookies if 'youtube.com' in c.get('domain', '') or 'google.com' in c.get('domain', '')])
             facebook_count = len([c for c in relevant_cookies if 'facebook.com' in c.get('domain', '') or 'fb.com' in c.get('domain', '')])
             instagram_count = len([c for c in relevant_cookies if 'instagram.com' in c.get('domain', '')])
+            tiktok_count = len([c for c in relevant_cookies if 'tiktok' in c.get('domain', '') or 'byteoversea.com' in c.get('domain', '') or 'ibytedtos.com' in c.get('domain', '')])
             
             log.info(f"📊 YouTube cookies: {youtube_count}")
             log.info(f"📊 Facebook cookies: {facebook_count}")
             log.info(f"📊 Instagram cookies: {instagram_count}")
+            log.info(f"📊 TikTok cookies: {tiktok_count}")
             
             # Перевіряємо критичні cookies
             cookie_names = [c.get('name') for c in relevant_cookies]
@@ -160,7 +165,7 @@ async def interactive_login():
     """Інтерактивний логін для першого разу"""
     
     log.info("🔐 Interactive login mode...")
-    log.info("   Browser will open, please login to YouTube, Facebook, and Instagram")
+    log.info("   Browser will open, please login to YouTube, Facebook, Instagram, and TikTok")
     
     async with async_playwright() as p:
         browser = await p.chromium.launch_persistent_context(
@@ -192,14 +197,20 @@ async def interactive_login():
             
             # Зберігаємо cookies
             cookies = await browser.cookies()
-            youtube_cookies = [
+            relevant_cookies = [
                 c for c in cookies 
-                if 'youtube.com' in c.get('domain', '') or 'google.com' in c.get('domain', '')
+                if any(domain in c.get('domain', '') for domain in [
+                    'youtube.com', 'google.com',
+                    'facebook.com', 'fb.com',
+                    'instagram.com', 'cdninstagram.com',
+                    'tiktok.com', 'tiktokv.com', 'tiktokcdn.com',
+                    'byteoversea.com', 'ibytedtos.com',
+                ])
             ]
             
             # Netscape format
             netscape_lines = ["# Netscape HTTP Cookie File\n"]
-            for cookie in youtube_cookies:
+            for cookie in relevant_cookies:
                 domain = cookie.get('domain', '')
                 flag = 'TRUE' if domain.startswith('.') else 'FALSE'
                 path = cookie.get('path', '/')
@@ -213,7 +224,7 @@ async def interactive_login():
             
             COOKIE_FILE.write_text(''.join(netscape_lines))
             
-            log.info(f"✅ Saved {len(youtube_cookies)} cookies")
+            log.info(f"✅ Saved {len(relevant_cookies)} cookies")
             log.info(f"📁 Cookie file: {COOKIE_FILE}")
             log.info("✅ You can now run automatic refresh")
             

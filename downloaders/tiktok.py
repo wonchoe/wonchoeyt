@@ -2,6 +2,7 @@
 
 import re
 import logging
+import os
 from pathlib import Path
 from typing import List, Tuple
 import yt_dlp
@@ -55,6 +56,7 @@ class TikTokDownloader(BaseDownloader):
             download_dir.mkdir(exist_ok=True)
             
             # yt-dlp options for TikTok
+            cookies_path = Path("/var/www/ytdl-cookies.txt")
             ydl_opts = {
                 'format': 'best',  # TikTok usually has single quality
                 'outtmpl': str(download_dir / '%(title).50s-%(id)s.%(ext)s'),
@@ -71,7 +73,18 @@ class TikTokDownloader(BaseDownloader):
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Referer': 'https://www.tiktok.com/',
                 },
+                'extractor_args': {
+                    'tiktok': {
+                        'webpage_download': ['1'],
+                    },
+                },
             }
+
+            if cookies_path.exists() and os.path.getsize(cookies_path) > 0:
+                ydl_opts['cookiefile'] = str(cookies_path)
+                log.info(f"🍪 Using TikTok cookies file: {cookies_path}")
+            else:
+                log.warning("⚠️ TikTok cookies file not found; sensitive/restricted posts may fail")
             
             # Add progress hook
             if progress_callback:

@@ -13,6 +13,7 @@ ARGO_APP_NAME="${YTDL_ARGO_APP_NAME:-ytdl-bot}"
 ARGO_NAMESPACE="${YTDL_ARGO_NAMESPACE:-argocd}"
 KUBE_NAMESPACE="${YTDL_KUBE_NAMESPACE:-wonchoeyoutubebot}"
 DEPLOYMENT_NAME="${YTDL_DEPLOYMENT_NAME:-ytdl-bot}"
+DOCKER_PULL_SECRET="${YTDL_DOCKER_PULL_SECRET:-dockerhub-pull-secret}"
 LOG_RETENTION_DAYS="${YTDL_LOG_RETENTION_DAYS:-14}"
 IMAGE_RETENTION_COUNT="${YTDL_IMAGE_RETENTION_COUNT:-3}"
 DRY_RUN=0
@@ -158,10 +159,55 @@ get_image_version() {
   docker run --rm --entrypoint yt-dlp "$1" --version
 }
 
+docker_login_from_k8s_secret() {
+  local tmp_config username password registry
+
+  tmp_config="$(mktemp)"
+  if ! sudo kubectl -n "$KUBE_NAMESPACE" get secret "$DOCKER_PULL_SECRET" -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > "$tmp_config"; then
+    rm -f "$tmp_config"
+    log "Unable to read Docker pull secret $KUBE_NAMESPACE/$DOCKER_PULL_SECRET"
+    exit 1
+  fi
+
+  read -r registry username password < <(python3 - "$tmp_config" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+auths = payload.get("auths", {})
+for registry, data in auths.items():
+    username = data.get("username")
+    password = data.get("password")
+    if username and password:
+        print(registry, username, password)
+        break
+PY
+  )
+  rm -f "$tmp_config"
+
+  if [[ -z "${username:-}" || -z "${password:-}" ]]; then
+    log "Docker pull secret $KUBE_NAMESPACE/$DOCKER_PULL_SECRET does not contain username/password auth."
+    exit 1
+  fi
+
+  registry="${registry#https://}"
+  registry="${registry#http://}"
+  registry="${registry%/v1/}"
+  registry="${registry%/}"
+
+  log "Logging in to Docker registry ${registry:-Docker Hub} as $username"
+  if [[ -n "$registry" ]]; then
+    printf '%s\n' "$password" | docker login "$registry" --username "$username" --password-stdin >/dev/null
+  else
+    printf '%s\n' "$password" | docker login --username "$username" --password-stdin >/dev/null
+  fi
+}
+
 build_and_push_image() {
   CURRENT_BUILD_TAG="auto-$timestamp"
   log "Building and pushing $IMAGE_REPO:$CURRENT_BUILD_TAG"
   if [[ $DRY_RUN -eq 0 ]]; then
+    docker_login_from_k8s_secret
     run docker buildx build --platform linux/arm64 -t "$IMAGE_REPO:latest" -t "$IMAGE_REPO:$CURRENT_BUILD_TAG" --push "$APP_REPO_DIR"
     run docker pull "$IMAGE_REPO:latest"
     run docker pull "$IMAGE_REPO:$CURRENT_BUILD_TAG"
