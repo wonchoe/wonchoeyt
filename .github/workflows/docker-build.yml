@@ -65,6 +65,9 @@ jobs:
           elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             build_required=true
             reason="manual-force"
+          elif [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+            build_required=true
+            reason="daily-dependency-refresh"
           elif [[ -z "$current_version" || -z "$current_digest" ]]; then
             build_required=true
             reason="missing-latest-image"
