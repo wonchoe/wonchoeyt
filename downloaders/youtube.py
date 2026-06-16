@@ -135,10 +135,10 @@ class YouTubeDownloader(BaseDownloader):
                 "noplaylist": True,
             }
 
-            # JS runtime is configured via /root/.config/yt-dlp/config (--js-runtimes node)
-            # Just log the node path for visibility
+            # Python API does not read /root/.config/yt-dlp/config, so configure EJS here.
             if node_path:
-                log.info(f"✅ Node.js available for yt-dlp EJS: {node_path}")
+                opts["js_runtimes"] = {"node": {"path": node_path}}
+                log.info(f"✅ Node.js runtime configured for yt-dlp EJS: {node_path}")
             else:
                 log.warning("⚠️ Node.js not found - YouTube EJS challenges may fail")
 
