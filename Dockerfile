@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -33,8 +33,12 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir -U pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-# Force-upgrade yt-dlp to latest to avoid "Requested format is not available" on stale builds
-RUN pip install --no-cache-dir -U yt-dlp
+# Force-upgrade yt-dlp to latest (with [default] to keep yt-dlp-ejs in sync)
+RUN pip install --no-cache-dir -U "yt-dlp[default]"
+
+# Configure yt-dlp to use Node.js runtime and auto-download EJS scripts from GitHub
+RUN mkdir -p /root/.config/yt-dlp && \
+    printf -- '--js-runtimes node\n--remote-components ejs:github\n' > /root/.config/yt-dlp/config
 
 # 3. Встановлюємо Playwright browsers
 RUN playwright install chromium

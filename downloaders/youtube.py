@@ -136,14 +136,12 @@ class YouTubeDownloader(BaseDownloader):
             }
 
             # Налаштування JS runtime для YouTube challenges (EJS)
+            # js_runtimes must be a list of strings like ["node:/path"]
             if node_path:
-                opts["js_runtimes"] = {"node": {"path": node_path}}
+                opts["js_runtimes"] = [f"node:{node_path}"]
+                log.info(f"✅ Node.js runtime configured for yt-dlp: node:{node_path}")
             else:
                 log.warning("⚠️ No JS runtime configured for yt-dlp")
-            
-            # Node.js вже в PATH, yt-dlp автоматично знайде його
-            if node_path:
-                log.info(f"✅ Node.js configured for yt-dlp (in PATH)")
 
 
 
