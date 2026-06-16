@@ -1,4 +1,4 @@
-name: Build, Publish and Sync GitOps
+name: Build, Publish and Update GitOps
 
 on:
   push:
@@ -186,5 +186,5 @@ jobs:
           {
             echo "### GitOps"
             echo "- Updated k3s-cursor.style to ${{ steps.target.outputs.image_ref }}"
-            echo "- ArgoCD will auto-sync from the new Git revision"
+            echo "- Updated k3s GitOps manifests; ArgoCD will pick up the new Git revision automatically"
           } >> "$GITHUB_STEP_SUMMARY"
