@@ -33,6 +33,8 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir -U pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Force-upgrade yt-dlp to latest to avoid "Requested format is not available" on stale builds
+RUN pip install --no-cache-dir -U yt-dlp
 
 # 3. Встановлюємо Playwright browsers
 RUN playwright install chromium

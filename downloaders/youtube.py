@@ -149,8 +149,8 @@ class YouTubeDownloader(BaseDownloader):
 
             
             if mode == "audio":
-                # Максимально м'який fallback для audio
-                opts["format"] = "bestaudio[protocol=https]/bestaudio*/best[protocol=https]/best"
+                # Fallback chain without protocol restriction — avoids "Requested format is not available"
+                opts["format"] = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
                 opts["postprocessors"] = [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
@@ -159,20 +159,17 @@ class YouTubeDownloader(BaseDownloader):
                 opts["writethumbnail"] = False
                 opts["writesubtitles"] = False
             else:
-                # Максимально агресивний fallback для відео
+                # Fallback chain without protocol restriction — avoids "Requested format is not available"
                 if video_quality:
                     opts["format"] = (
-                        f"bestvideo*[height<={video_quality}][protocol=https]+bestaudio[protocol=https]/"
-                        f"bestvideo[height<={video_quality}][protocol=https]+bestaudio[protocol=https]/"
-                        f"best*[height<={video_quality}][protocol=https]/"
-                        f"best[height<={video_quality}][protocol=https]/"
-                        "best*[protocol=https]/best[protocol=https]"
+                        f"bestvideo*[height<={video_quality}]+bestaudio/"
+                        f"bestvideo[height<={video_quality}]+bestaudio/"
+                        f"best[height<={video_quality}]/"
+                        "bestvideo*+bestaudio/best"
                     )
                 else:
                     opts["format"] = (
-                        "bestvideo*[protocol=https]+bestaudio[protocol=https]/"
-                        "bestvideo[protocol=https]+bestaudio[protocol=https]/"
-                        "best*[protocol=https]/best[protocol=https]"
+                        "bestvideo*+bestaudio/bestvideo+bestaudio/best"
                     )
                 opts["merge_output_format"] = "mp4"
             

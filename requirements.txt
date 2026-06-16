@@ -1,5 +1,5 @@
 python-telegram-bot
-yt-dlp[default]
+yt-dlp[default]>=2024.12.13
 python-dotenv
 aiohttp
 instaloader
