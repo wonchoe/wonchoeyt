@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 1. Встановлюємо базові утиліти, Node.js v20 та Playwright dependencies
+# 1. Встановлюємо базові утиліти, Node.js v22 та Playwright dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \

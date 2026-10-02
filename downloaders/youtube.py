@@ -190,20 +190,17 @@ class YouTubeDownloader(BaseDownloader):
                 # НЕ додаємо extractor_args - нехай yt-dlp сам вибере клієнт
                 strategies.append(("with cookies (default)", opts_simple))
 
-                # Fallback: force android client (helps with 403)
-                strategies.append((
-                    "with cookies (android client)",
-                    with_player_client(opts_simple, "android"),
-                ))
             else:
                 log.warning("⚠️ Proceeding without cookies; some formats may be unavailable")
-                strategies.append(("without cookies", opts.copy()))
 
-                # Fallback: force android client (helps with 403)
-                strategies.append((
-                    "without cookies (android client)",
-                    with_player_client(opts.copy(), "android"),
-                ))
+            # Account cookies can stop extraction (e.g. "The page needs to be
+            # reloaded"). Retry anonymously using yt-dlp's current defaults.
+            # Android does not support account cookies and must stay anonymous.
+            strategies.append(("without cookies", opts.copy()))
+            strategies.append((
+                "without cookies (android client)",
+                with_player_client(opts.copy(), "android"),
+            ))
             
             for strategy_name, strategy_opts in strategies:
                 try:

@@ -60,7 +60,21 @@ kubectl logs -n wonchoeyoutubebot deployment/ytdl-bot --tail=50
 
 ### Automated Daily Updates
 
-The production host runs a local `systemd` timer for this repository:
+The primary update path is `.github/workflows/docker-build.yml`: it runs on pushes,
+daily at 03:00 UTC, or manually. It tests the downloader, builds a fresh ARM64 image
+with the latest stable `yt-dlp`, and updates the pinned image digest in
+`wonchoe/k3s-cursor.style`. ArgoCD then deploys it.
+
+If GitHub disables the scheduled workflow due to repository inactivity, re-enable
+it and trigger an update:
+
+```bash
+gh workflow enable docker-build.yml --repo wonchoe/wonchoeyt
+gh workflow run docker-build.yml --repo wonchoe/wonchoeyt
+```
+
+A local `systemd` timer is also available as an alternative, provided the production
+host has Docker Hub credentials with permission to push `wonchoe/ytdl-bot`:
 
 - it pulls `/home/ubuntu/wonchoeyt`
 - checks the latest stable `yt-dlp` release on PyPI
@@ -86,7 +100,7 @@ sudo systemctl enable --now ytdl-bot-auto-update.timer
 sudo systemctl start ytdl-bot-auto-update.service
 ```
 
-The GitHub Actions workflow can stay as a fallback/manual path, but the normal production update path is now local to this project.
+Use one daily update path at a time to avoid concurrent image and GitOps updates.
 
 ### Docker Compose (Local)
 
