@@ -7,6 +7,7 @@
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 from playwright.async_api import async_playwright
 
@@ -20,6 +21,22 @@ SITES = [
     "https://www.instagram.com",
     "https://www.tiktok.com"
 ]
+
+
+def warn_if_instagram_logged_out(cookies):
+    """Guest cookies do not establish an Instagram login."""
+    has_session = any(
+        (cookie.get("domain", "").lstrip(".") == "instagram.com"
+         or cookie.get("domain", "").endswith(".instagram.com"))
+        and cookie.get("name") == "sessionid"
+        and cookie.get("value")
+        and (cookie.get("expires", -1) <= 0 or cookie["expires"] > time.time())
+        for cookie in cookies
+    )
+    if not has_session:
+        log.warning("⚠️ Cookie-refresher profile has no valid sessionid for Instagram. "
+                    "Guest cookies cannot download login-restricted posts. "
+                    "The bot's separate browser profile is managed by instagram_browser.py login.")
 
 
 async def refresh_cookies(save_html=False):
@@ -78,6 +95,7 @@ async def refresh_cookies(save_html=False):
             
             # Отримуємо всі cookies (вже маємо з перевірки вище)
             all_cookies = await browser.cookies()
+            warn_if_instagram_logged_out(all_cookies)
             
             # Фільтруємо cookies для YouTube, Facebook, Instagram, TikTok, Google
             relevant_cookies = [
@@ -197,6 +215,7 @@ async def interactive_login():
             
             # Зберігаємо cookies
             cookies = await browser.cookies()
+            warn_if_instagram_logged_out(cookies)
             relevant_cookies = [
                 c for c in cookies 
                 if any(domain in c.get('domain', '') for domain in [
@@ -215,7 +234,7 @@ async def interactive_login():
                 flag = 'TRUE' if domain.startswith('.') else 'FALSE'
                 path = cookie.get('path', '/')
                 secure = 'TRUE' if cookie.get('secure', False) else 'FALSE'
-                expiration = str(int(cookie.get('expires', -1)))
+                expiration = str(max(0, int(cookie.get('expires', -1))))
                 name = cookie.get('name', '')
                 value = cookie.get('value', '')
                 

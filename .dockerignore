@@ -1,0 +1,10 @@
+.git
+.env
+.venv
+venv
+**/__pycache__
+*.pyc
+downloads
+playwright-profile
+.instagram-profile
+*cookies.txt

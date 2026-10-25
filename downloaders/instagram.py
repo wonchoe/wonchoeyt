@@ -1,357 +1,251 @@
-"""Instagram downloader using yt-dlp and instaloader"""
+"""Instagram downloads with anonymous and authenticated fallbacks."""
 
-import re
-import time
 import asyncio
-from pathlib import Path
-from typing import Optional, Tuple, List
+import http.cookiejar
+import os
+import re
+import shutil
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import List, Tuple
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 import yt_dlp
 
 from .base import BaseDownloader, log
+from .instagram_browser import BrowserDownloadError, download_with_browser
 
 try:
     import instaloader
-    INSTALOADER_AVAILABLE = True
 except ImportError:
-    INSTALOADER_AVAILABLE = False
-    log.warning("⚠️ instaloader not available, photo posts may fail")
+    instaloader = None
 
 
 POOL = ThreadPoolExecutor(max_workers=4)
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv"}
+GALLERY_TIMEOUT = 120
+
+
+class InstagramDownloadError(Exception):
+    """A download failure whose message can be displayed in Telegram."""
 
 
 class InstagramDownloader(BaseDownloader):
-    """Download from Instagram (posts, reels, stories, IGTV)"""
-    
-    PATTERNS = [
-        r'instagram\.com/p/',      # posts
-        r'instagram\.com/reel/',   # reels
-        r'instagram\.com/tv/',     # IGTV
-        r'instagram\.com/stories/', # stories
-        r'instagr\.am/',
-    ]
-    
     @staticmethod
     def can_handle(url: str) -> bool:
-        """Check if URL is Instagram"""
-        return any(re.search(pattern, url, re.I) for pattern in InstagramDownloader.PATTERNS)
-    
-    async def download(
-        self,
-        url: str,
-        download_dir: Path,
-        progress_callback=None
-    ) -> Tuple[List[Path], str]:
-        """
-        Download from Instagram
-        
-        Args:
-            url: Instagram URL
-            download_dir: Directory to save files
-            progress_callback: Callback for progress updates
-        
-        Returns:
-            Tuple[List[Path], str]: (filepaths, media_type)
-            media_type: 'photo', 'video', 'carousel'
-        """
-        
-        # Clean URL - remove query parameters that confuse downloaders
-        url = re.sub(r'\?.*$', '', url)
-        log.info(f"🔗 Clean URL: {url}")
-        
-        last_update = [0]
-        
-        def progress_hook(d):
-            # Progress hook runs in thread, skip for now
-            pass
-        
-        def sync_download():
-            """Download using yt-dlp → instaloader → gallery-dl"""
-            
-            # Prefer no-cookies attempt first (requested)
-            try:
-                files, media_type = download_with_ytdlp(use_cookies=False)
-                
-                # If yt-dlp returned 0 files, try instaloader
-                if not files and INSTALOADER_AVAILABLE:
-                    log.info("📸 yt-dlp returned 0 files, trying instaloader...")
-                    return download_with_instaloader()
-                
-                return files, media_type
-                
-            except Exception as e:
-                log.warning(f"⚠️ yt-dlp (no cookies) failed: {e}")
-            
-            # Fallback: try yt-dlp with cookies if available
-            try:
-                files, media_type = download_with_ytdlp(use_cookies=True)
-                if files:
-                    return files, media_type
-            except Exception as e:
-                error_msg = str(e).lower()
-                
-                # If "no video in this post" - try instaloader for photos
-                if ("no video" in error_msg or "no formats" in error_msg) and INSTALOADER_AVAILABLE:
-                    log.info("📸 Trying instaloader for photo post...")
-                    try:
-                        return download_with_instaloader()
-                    except Exception as insta_err:
-                        log.warning(f"⚠️ Instaloader failed: {insta_err}")
-                        log.info("🎨 Trying gallery-dl as last resort...")
-                        return download_with_gallery_dl(use_cookies=False)
-                else:
-                    # Try gallery-dl as last resort
-                    log.info("🎨 Trying gallery-dl as fallback...")
-                    return download_with_gallery_dl(use_cookies=False)
-        
-        def download_with_ytdlp(use_cookies: bool):
-            """Download using yt-dlp"""
-            log.info(f"🔄 Trying yt-dlp ({'with' if use_cookies else 'no'} cookies)...")
-            opts = {
-                "outtmpl": str(download_dir / "%(title)s_%(autonumber)s.%(ext)s"),
-                "quiet": False,  # Show more info
-                "no_warnings": False,
-                "progress_hooks": [progress_hook],
-                "restrictfilenames": True,
-                # Force download all items in post (carousel)
-                "noplaylist": False,
-                # Get best quality for photos
-                "format": "best",
-                "retries": 3,
-                "fragment_retries": 3,
-                "http_headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-us,en;q=0.5",
-                    "Referer": "https://www.instagram.com/",
-                },
-            }
+        parts = urlsplit(url)
+        return parts.hostname in {"instagram.com", "www.instagram.com", "instagr.am"} and bool(
+            re.match(r"/(?:p|reels?|tv|stories)/", parts.path)
+        )
 
-            if use_cookies:
-                cookies_path = Path("/var/www/ytdl-cookies.txt")
-                if cookies_path.exists():
-                    opts["cookiefile"] = str(cookies_path)
-                else:
-                    log.warning("⚠️ Cookies file not found, continuing without cookies")
-            
-            files = []
-            media_type = "video"
-            
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                
-                # Check if it's a carousel (multiple items)
-                if "entries" in info and info["entries"]:
-                    # Carousel/album - multiple photos/videos
-                    photos = []
-                    videos = []
-                    
-                    for entry in info["entries"]:
-                        if not entry:
-                            continue
-                        filepath = ydl.prepare_filename(entry)
-                        fp = Path(filepath)
-                        
-                        if fp.exists():
-                            files.append(fp)
-                            
-                            # Classify by extension and format info
-                            ext = fp.suffix.lower()
-                            vcodec = entry.get("vcodec", "none")
-                            
-                            # Photo if no video codec or static image extensions
-                            if ext in ['.jpg', '.jpeg', '.png', '.webp'] or vcodec == "none":
-                                photos.append(fp)
-                            else:
-                                videos.append(fp)
-                    
-                    # Determine media type
-                    if photos and not videos:
-                        media_type = "photo_album"
-                    elif videos and not photos:
-                        media_type = "video_album"
-                    else:
-                        media_type = "mixed_album"
-                    
-                    log.info(f"📦 Carousel: {len(photos)} photos, {len(videos)} videos")
-                
-                else:
-                    # Single item
-                    filepath = ydl.prepare_filename(info)
-                    fp = Path(filepath)
-                    
-                    if fp.exists():
-                        files.append(fp)
-                        
-                        # Detect if photo or video
-                        ext = fp.suffix.lower()
-                        vcodec = info.get("vcodec", "none")
-                        
-                        if ext in ['.jpg', '.jpeg', '.png', '.webp'] or vcodec == "none":
-                            media_type = "photo"
-                            log.info(f"📸 Single photo")
-                        else:
-                            media_type = "video"
-                            log.info(f"🎬 Single video")
-            
-            return files, media_type
-        
-        def download_with_instaloader():
-            """Download photos using instaloader"""
-            if not INSTALOADER_AVAILABLE:
-                raise Exception("instaloader not installed")
-            
-            # Extract shortcode from URL
-            match = re.search(r'instagram\.com/(?:p|reel|tv)/([^/]+)', url)
-            if not match:
-                raise Exception("Cannot extract Instagram shortcode")
-            
-            shortcode = match.group(1)
-            
-            # Setup instaloader with cookies support
-            L = instaloader.Instaloader(
-                download_videos=False,
-                download_video_thumbnails=False,
-                download_geotags=False,
-                download_comments=False,
-                save_metadata=False,
-                compress_json=False,
-                dirname_pattern=str(download_dir),
-                filename_pattern="{shortcode}_{mediacount}"
-            )
-            
-            # Try to load cookies if available
-            cookies_file = Path("/var/www/ytdl-cookies.txt")
-            if cookies_file.exists():
-                try:
-                    # Load cookies from Netscape format
-                    import http.cookiejar
-                    cj = http.cookiejar.MozillaCookieJar(str(cookies_file))
-                    cj.load(ignore_discard=True, ignore_expires=True)
-                    
-                    # Extract Instagram cookies
-                    for cookie in cj:
-                        if 'instagram.com' in cookie.domain:
-                            L.context._session.cookies.set_cookie(cookie)
-                    
-                    log.info("🍪 Loaded Instagram cookies")
-                except Exception as e:
-                    log.warning(f"Failed to load cookies: {e}")
+    @staticmethod
+    def _cookies():
+        """Read only Instagram cookies; never rewrite the shared cookie file."""
+        source = Path(os.getenv("INSTAGRAM_COOKIES_FILE", "/var/www/ytdl-cookies.txt"))
+        jar = http.cookiejar.MozillaCookieJar()
+        if not source.is_file():
+            return jar
+        try:
+            saved = http.cookiejar.MozillaCookieJar(str(source))
+            saved.load(ignore_discard=True, ignore_expires=True)
+            for cookie in saved:
+                domain = cookie.domain.lstrip(".")
+                if domain != "instagram.com" and not domain.endswith(".instagram.com"):
+                    continue
+                if cookie.expires == 0:
+                    cookie.expires = None
+                    cookie.discard = True
+                if not cookie.is_expired() and cookie.value:
+                    jar.set_cookie(cookie)
+        except (OSError, http.cookiejar.LoadError):
+            # CookieJar parse errors can include an entire cookie value.
+            log.warning("Cannot read Instagram cookies from %s; expected Netscape cookie format", source)
+        return jar
+
+    @staticmethod
+    def _media_files(directory: Path) -> List[Path]:
+        # Natural filename order preserves carousel positions (2 before 10).
+        def key(path):
+            return [int(part) if part.isdigit() else part.lower()
+                    for part in re.split(r"(\d+)", str(path.relative_to(directory)))]
+
+        return sorted((path for path in directory.rglob("*")
+                       if path.is_file() and path.suffix.lower() in PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
+                       and path.stat().st_size > 0), key=key)
+
+    @staticmethod
+    def _media_type(files: List[Path]) -> str:
+        # Instagram can omit vcodec even for an MP4; use the actual file type.
+        photos = sum(path.suffix.lower() in PHOTO_EXTENSIONS for path in files)
+        if len(files) == 1:
+            return "photo" if photos else "video"
+        if photos == len(files):
+            return "photo_album"
+        return "mixed_album" if photos else "video_album"
+
+    @staticmethod
+    def _public_error(errors, authenticated: bool) -> InstagramDownloadError:
+        details = " ".join(errors).lower()
+        if any(term in details for term in (
+            "isn't available to everyone", "certain audiences", "login", "log in",
+            "sign in", "private", "401", "restricted video", "18 years",
+        )):
+            if authenticated:
+                message = ("Instagram обмежив доступ до цього допису. Оновіть вхід Instagram "
+                           "для бота й перевірте, чи цей акаунт має доступ до допису.")
             else:
-                log.warning("⚠️ No cookies file found, Instagram photo downloads may fail")
-            
-            try:
-                # Download post
-                post = instaloader.Post.from_shortcode(L.context, shortcode)
-                
-                files = []
-                media_type = "photo"
-                
-                # Download all items in post
-                if post.typename == 'GraphSidecar':  # Carousel
-                    media_type = "photo_album"
-                    count = post.mediacount
-                    log.info(f"📦 Downloading carousel with {count} items...")
-                    
-                    L.download_post(post, target=str(download_dir))
-                    
-                    # Find downloaded files - instaloader uses pattern: shortcode_count_index.ext
-                    for i in range(1, count + 1):
-                        pattern = f"{shortcode}_{count}_{i}.*"
-                        found = list(download_dir.glob(pattern))
-                        for fp in found:
-                            if fp.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp']:
-                                files.append(fp)
-                                break
-                    
-                    log.info(f"📦 Photo album: {len(files)} photos downloaded")
-                
-                else:  # Single photo
-                    L.download_post(post, target=str(download_dir))
-                    
-                    # Find downloaded file - instaloader uses pattern: shortcode_1_1.ext or shortcode.ext
-                    patterns = [f"{shortcode}_1_1.*", f"{shortcode}.*"]
-                    for pattern in patterns:
-                        found = list(download_dir.glob(pattern))
-                        for fp in found:
-                            if fp.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp'] and '_' not in fp.stem[len(shortcode):]:
-                                files.append(fp)
-                                break
-                        if files:
-                            break
-                    
-                    log.info(f"📸 Single photo downloaded")
-                
-                if not files:
-                    raise Exception("No files downloaded")
-                
-                return files, media_type
-            
-            except Exception as e:
-                log.error(f"Instaloader error: {e}")
-                raise
-        
-        def download_with_gallery_dl(use_cookies: bool = False):
-            """Download using gallery-dl"""
-            import subprocess
-            import json
-            
-            log.info("🎨 Using gallery-dl...")
-            
-            # Prepare command
-            cmd = [
-                "gallery-dl",
-                "--quiet",
-                "--no-check-certificate",
-                "-D", str(download_dir),
-            ]
-            
-            # Add cookies if requested and available
-            if use_cookies:
-                cookies_file = Path("/var/www/ytdl-cookies.txt")
-                if cookies_file.exists():
-                    cmd.extend(["--cookies", str(cookies_file)])
-            
-            cmd.append(url)
-            
-            # Run gallery-dl
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if result.returncode != 0:
-                raise Exception(f"gallery-dl failed: {result.stderr}")
-            
-            # Find downloaded files
-            files = []
-            for ext in ['jpg', 'jpeg', 'png', 'mp4', 'webm']:
-                files.extend(download_dir.glob(f"*.{ext}"))
-            
-            if not files:
-                raise Exception("No files downloaded by gallery-dl")
-            
-            # Sort by modification time (newest first)
-            files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-            
-            # Determine media type
-            media_type = "video" if any(f.suffix.lower() in ['.mp4', '.webm'] for f in files) else "photo"
-            
-            log.info(f"✅ gallery-dl downloaded {len(files)} file(s)")
-            return files, media_type
-        
-        loop = asyncio.get_running_loop()
-        files, media_type = await loop.run_in_executor(POOL, sync_download)
-        
-        # Clean filenames
-        cleaned_files = []
-        for fp in files:
-            if fp.exists():
-                clean_name = self.clean_filename(fp.name)
-                if clean_name != fp.name:
-                    new_fp = fp.parent / clean_name
-                    fp.rename(new_fp)
-                    fp = new_fp
-                    log.info(f"📝 Renamed to: {clean_name}")
-                cleaned_files.append(fp)
-        
-        return cleaned_files, media_type
+                message = ("Для цього допису потрібен вхід в Instagram. "
+                           "Адміністратору потрібно додати чинні cookies Instagram для бота.")
+        elif any(term in details for term in ("429", "too many requests", "please wait", "rate limit")):
+            message = "Instagram тимчасово обмежив запити. Спробуйте пізніше."
+        elif any(term in details for term in ("not found", "404", "does not exist", "deleted")):
+            message = "Допис Instagram не знайдено або видалено. Перевірте посилання."
+        elif any(term in details for term in ("timed out", "timeout")):
+            message = "Instagram не відповів вчасно. Спробуйте ще раз пізніше."
+        else:
+            message = "Не вдалося завантажити допис Instagram. Спробуйте пізніше."
+        return InstagramDownloadError(message)
+
+    def _download_ytdlp(self, url: str, directory: Path, cookies_file):
+        opts = {
+            "outtmpl": str(directory / "%(id)s_%(autonumber)03d.%(ext)s"),
+            "quiet": True,
+            "restrictfilenames": True,
+            "noplaylist": False,
+            "format": "best",
+            "retries": 1,
+            "fragment_retries": 1,
+            "extractor_retries": 1,
+            "socket_timeout": 20,
+        }
+        if cookies_file:
+            opts["cookiefile"] = str(cookies_file)
+        with yt_dlp.YoutubeDL(opts) as downloader:
+            downloader.extract_info(url, download=True)
+
+    def _download_gallery(self, url: str, directory: Path, cookies_file):
+        cmd = [
+            sys.executable, "-m", "gallery_dl", "--config-ignore", "--no-input",
+            "--quiet", "--no-colors", "--http-timeout", "20", "--retries", "1",
+            "-D", str(directory),
+        ]
+        if cookies_file:
+            cmd.extend(["--cookies", str(cookies_file)])
+        cmd.append(url)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=GALLERY_TIMEOUT)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("gallery-dl timed out after 120 seconds") from error
+        if result.returncode:
+            # Prefer extractor errors over warnings and Python source lines.
+            lines = result.stderr.splitlines()
+            details = [line for line in lines if "[error]" in line.lower()]
+            detail = " | ".join(details or lines[-3:])
+            raise RuntimeError(f"gallery-dl failed ({result.returncode}): {detail}")
+
+    def _download_instaloader(self, url: str, directory: Path, cookies_file):
+        match = re.search(r"/(?:p|reels?|tv)/([\w-]+)", urlsplit(url).path)
+        if not match:
+            raise RuntimeError("Instaloader needs a post or reel URL")
+        loader = instaloader.Instaloader(
+            download_videos=True,
+            download_video_thumbnails=False,
+            download_geotags=False,
+            download_comments=False,
+            save_metadata=False,
+            post_metadata_txt_pattern="",
+            dirname_pattern=str(directory),
+            filename_pattern="{shortcode}",
+            max_connection_attempts=1,
+            request_timeout=20,
+            fatal_status_codes=[400, 401, 403, 429],
+        )
+        try:
+            loader.context.raise_all_errors = True
+            if cookies_file:
+                jar = http.cookiejar.MozillaCookieJar(str(cookies_file))
+                jar.load(ignore_discard=True, ignore_expires=True)
+                loader.context._session.cookies.update(jar)
+                csrf = next((cookie.value for cookie in jar if cookie.name == "csrftoken"), None)
+                if csrf:
+                    loader.context._session.headers["X-CSRFToken"] = csrf
+                loader.context.username = loader.test_login()
+                if not loader.context.username:
+                    raise RuntimeError("Instagram login required: session cookies are no longer valid")
+            post = instaloader.Post.from_shortcode(loader.context, match.group(1))
+            if not loader.download_post(post, target=str(directory)):
+                raise RuntimeError("Instaloader did not download the complete post")
+        finally:
+            loader.close()
+
+    def _download_browser(self, url: str, directory: Path, cookies_file):
+        # The saved browser session stays in Chromium and is not given to extractors.
+        download_with_browser(url, directory)
+
+    async def download(
+        self, url: str, download_dir: Path, progress_callback=None
+    ) -> Tuple[List[Path], str]:
+        parts = urlsplit(url)
+        url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+        download_dir.mkdir(parents=True, exist_ok=True)
+
+        def sync_download():
+            cookies = self._cookies()
+            authenticated = any(cookie.name == "sessionid" for cookie in cookies)
+            if not authenticated:
+                log.warning("Cookie file has no valid Instagram sessionid; the saved browser profile is checked separately")
+
+            attempts = [(self._download_ytdlp, False)]
+            if authenticated:
+                attempts.extend([(self._download_ytdlp, True), (self._download_gallery, True)])
+            attempts.append((self._download_gallery, False))
+            if instaloader is not None and re.match(r"/(?:p|reels?|tv)/", parts.path):
+                attempts.append((self._download_instaloader, authenticated))
+            if re.match(r"/(?:p|reels?|tv)/", parts.path):
+                attempts.append((self._download_browser, False))
+
+            errors = []
+            browser_error = None
+            for download, use_cookies in attempts:
+                label = f"{download.__name__} ({'authenticated' if use_cookies else 'anonymous'})"
+                if download.__name__ == "_download_browser":
+                    label = "Chromium (saved browser profile)"
+                log.info("Instagram: trying %s", label)
+                # Each attempt owns its files, including partial downloads and cookies.
+                with TemporaryDirectory(prefix=".instagram-", dir=download_dir) as temp:
+                    directory = Path(temp)
+                    cookie_file = None
+                    if use_cookies:
+                        cookie_file = directory / "cookies.txt"
+                        cookies.save(str(cookie_file), ignore_discard=True, ignore_expires=True)
+                    try:
+                        download(url, directory, cookie_file)
+                        files = self._media_files(directory)
+                        if not files:
+                            raise RuntimeError("No media files downloaded")
+                    except Exception as error:
+                        if isinstance(error, BrowserDownloadError):
+                            browser_error = error
+                        errors.append(str(error))
+                        log.warning("Instagram %s failed: %s", label, error)
+                        continue
+
+                    media_type = self._media_type(files)
+                    batch = uuid4().hex[:12]
+                    output = []
+                    for index, file in enumerate(files, 1):
+                        target = download_dir / f"instagram_{batch}_{index:03d}{file.suffix.lower()}"
+                        shutil.move(str(file), target)
+                        output.append(target)
+                    return output, media_type
+
+            if browser_error is not None:
+                raise InstagramDownloadError(str(browser_error))
+            raise self._public_error(errors, authenticated)
+
+        return await asyncio.get_running_loop().run_in_executor(POOL, sync_download)

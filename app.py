@@ -20,6 +20,7 @@ from telegram.ext import (
 )
 
 from downloaders import YouTubeDownloader, InstagramDownloader, FacebookDownloader, TikTokDownloader
+from downloaders.instagram import InstagramDownloadError
 from utils import cleanup_old_files, cleanup_all_except_active, upload_to_gofile
 
 
@@ -284,9 +285,12 @@ async def download_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 except Exception as e:
                     log.warning(f"Failed to remove {fp.name}: {e}")
     
-    except Exception as e:
-        log.error(f"Instagram download error: {e}", exc_info=True)
-        await status_msg.edit_text(f"❌ Помилка: {str(e)[:100]}")
+    except InstagramDownloadError as e:
+        log.warning("Instagram download failed: %s", e)
+        await safe_edit_message(status_msg, f"❌ {e}")
+    except Exception:
+        log.exception("Instagram download or upload failed")
+        await safe_edit_message(status_msg, "❌ Не вдалося обробити допис Instagram. Спробуйте пізніше.")
 
 
 # ---------------------------------------------------------

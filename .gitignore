@@ -3,3 +3,8 @@ venv
 .env
 facebook.com_cookies.txt
 cookies.txt
+downloads/
+playwright-profile/
+.instagram-profile/
+__pycache__/
+*.pyc

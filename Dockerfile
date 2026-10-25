@@ -3,11 +3,18 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # 1. Встановлюємо базові утиліти, Node.js v22 та Playwright dependencies
-RUN apt-get update && apt-get install -y \
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     nano \
     gnupg \
+    # Temporary browser desktop for manual Instagram login via port-forward
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
+    fonts-liberation \
     # Playwright dependencies
     libnss3 \
     libnspr4 \
@@ -26,7 +33,7 @@ RUN apt-get update && apt-get install -y \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
-    && apt-get install -y nodejs \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Встановлюємо Python packages
