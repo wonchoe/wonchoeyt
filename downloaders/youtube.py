@@ -183,8 +183,27 @@ class YouTubeDownloader(BaseDownloader):
                 opts_client["extractor_args"] = extractor_args
                 return opts_client
             
-            # ПРІОРИТЕТ 1: Просто cookies БЕЗ extractor_args (як в CLI!)
             if use_cookies:
+                # ПРІОРИТЕТ 1: HLS (m3u8). З 11.2026 прямі https-потоки
+                # googlevideo (140/251/136…) з IP сервера дають 403 без PO-токена,
+                # а m3u8-формати (до 1080p) і комбінований 18 качаються.
+                opts_hls = opts.copy()
+                opts_hls["cookiefile"] = cookies_path
+                if mode == "audio":
+                    # Найменший HLS-потік з AAC-LC (360p ≈ 15 МБ), а не 1080p заради звуку
+                    opts_hls["format"] = (
+                        "worst[protocol^=m3u8][height>=360]/best[protocol^=m3u8]/18"
+                    )
+                elif video_quality:
+                    opts_hls["format"] = (
+                        f"best[protocol^=m3u8][height<={video_quality}]/"
+                        "best[protocol^=m3u8]/18"
+                    )
+                else:
+                    opts_hls["format"] = "best[protocol^=m3u8]/18"
+                strategies.append(("with cookies (HLS)", opts_hls))
+
+                # ПРІОРИТЕТ 2: Просто cookies БЕЗ extractor_args (як в CLI!)
                 opts_simple = opts.copy()
                 opts_simple["cookiefile"] = cookies_path
                 # НЕ додаємо extractor_args - нехай yt-dlp сам вибере клієнт

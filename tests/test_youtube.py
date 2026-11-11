@@ -43,16 +43,17 @@ class YouTubeRetryTests(unittest.IsolatedAsyncioTestCase):
         return downloader
 
     async def test_cookie_reload_error_retries_default_client_without_cookies(self):
+        hls = self.attempt(DownloadError("The page needs to be reloaded."))
         authenticated = self.attempt(DownloadError("The page needs to be reloaded."))
         anonymous = self.attempt()
-        self.youtube_dl.side_effect = [authenticated, anonymous]
+        self.youtube_dl.side_effect = [hls, authenticated, anonymous]
 
         output, media_type = await YouTubeDownloader().download(URL, self.download_dir)
 
         self.assertEqual(output, self.audio_file)
         self.assertEqual(media_type, "audio")
-        self.assertEqual(self.youtube_dl.call_count, 2)
-        authenticated_opts, anonymous_opts = [
+        self.assertEqual(self.youtube_dl.call_count, 3)
+        _, authenticated_opts, anonymous_opts = [
             call.args[0] for call in self.youtube_dl.call_args_list
         ]
         self.assertEqual(authenticated_opts["cookiefile"], COOKIE_PATH)
@@ -63,20 +64,21 @@ class YouTubeRetryTests(unittest.IsolatedAsyncioTestCase):
         anonymous.extract_info.assert_called_once_with(URL, download=True)
 
     async def test_android_retry_never_receives_account_cookies(self):
+        hls = self.attempt(DownloadError("The page needs to be reloaded."))
         authenticated = self.attempt(DownloadError("The page needs to be reloaded."))
         anonymous = self.attempt(DownloadError("Requested format is not available."))
         android = self.attempt()
-        self.youtube_dl.side_effect = [authenticated, anonymous, android]
+        self.youtube_dl.side_effect = [hls, authenticated, anonymous, android]
 
         output, media_type = await YouTubeDownloader().download(URL, self.download_dir)
 
         self.assertEqual((output, media_type), (self.audio_file, "audio"))
-        self.assertEqual(self.youtube_dl.call_count, 3)
+        self.assertEqual(self.youtube_dl.call_count, 4)
         retry_opts = [call.args[0] for call in self.youtube_dl.call_args_list]
-        self.assertNotIn("cookiefile", retry_opts[1])
         self.assertNotIn("cookiefile", retry_opts[2])
+        self.assertNotIn("cookiefile", retry_opts[3])
         self.assertEqual(
-            retry_opts[2]["extractor_args"]["youtube"]["player_client"], ["android"]
+            retry_opts[3]["extractor_args"]["youtube"]["player_client"], ["android"]
         )
 
     async def test_authenticated_success_keeps_converted_mp3_and_skips_retries(self):
@@ -89,6 +91,42 @@ class YouTubeRetryTests(unittest.IsolatedAsyncioTestCase):
         self.youtube_dl.assert_called_once()
         self.assertEqual(self.youtube_dl.call_args.args[0]["cookiefile"], COOKIE_PATH)
         self.assertTrue(output.exists())
+
+    async def test_first_attempt_uses_hls_because_direct_streams_need_po_token(self):
+        # 2026-11: googlevideo https formats (140/251/136) answer 403 from the
+        # server IP without a PO token; m3u8 formats still download.
+        self.youtube_dl.return_value = self.attempt()
+
+        await YouTubeDownloader().download(URL, self.download_dir)
+
+        opts = self.youtube_dl.call_args.args[0]
+        self.assertEqual(opts["cookiefile"], COOKIE_PATH)
+        for choice in opts["format"].split("/")[:-1]:
+            self.assertIn("[protocol^=m3u8]", choice)
+
+    async def test_video_hls_attempt_respects_requested_quality(self):
+        self.youtube_dl.return_value = self.attempt()
+
+        await YouTubeDownloader().download(
+            URL, self.download_dir, mode="video", video_quality="720"
+        )
+
+        opts = self.youtube_dl.call_args.args[0]
+        self.assertTrue(
+            opts["format"].startswith("best[protocol^=m3u8][height<=720]/")
+        )
+
+    async def test_hls_failure_falls_back_to_direct_formats_with_cookies(self):
+        hls = self.attempt(DownloadError("Requested format is not available."))
+        direct = self.attempt()
+        self.youtube_dl.side_effect = [hls, direct]
+
+        output, _ = await YouTubeDownloader().download(URL, self.download_dir)
+
+        self.assertEqual(output, self.audio_file)
+        direct_opts = self.youtube_dl.call_args_list[1].args[0]
+        self.assertEqual(direct_opts["cookiefile"], COOKIE_PATH)
+        self.assertNotIn("m3u8", direct_opts["format"])
 
 
 if __name__ == "__main__":
